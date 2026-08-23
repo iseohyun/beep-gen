@@ -1,0 +1,30 @@
+# Python 캐시 및 컴파일 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# PyInstaller 빌드 아티팩트 및 스펙 파일
+build/
+dist/
+*.spec
+
+# 생성된 오디오 및 임시 파일
+*.wav
+*.mp3
+*.aac
+*.m4a
+*.tmp
+*.log
+*.ps1
+
+# IDE 및 에디터 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS 아티팩트
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store
