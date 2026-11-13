@@ -54,3 +54,26 @@ python main.py -n 2 -m 4 -v 25 -l 60 -o my_beat.mp3
 | `--format` | | `mp3` | 출력 포맷 (`mp3` 또는 `wav`) |
 | `--gui` | | | 강제 GUI 실행 |
 | `--cli` | | | 강제 CLI 모드 실행 |
+
+---
+
+## 🦀 Rust 버전 (개발 중)
+
+웹·PC·CLI가 하나의 코어를 함께 쓰도록 Rust로 옮기는 중입니다. 현재는 비프 합성과 WAV/MP3 저장까지 구현되어 있으며, TTS 인트로와 GUI는 아직 Python 버전에만 있습니다. FFmpeg 없이 MP3를 만듭니다.
+
+```bash
+# 빌드
+cargo build --release -p beep-cli
+
+# 실행 (예: 1.4초 주기, 2분할, 60초)
+target/release/beep-gen -n 1.4 -m 2 -l 60 -o my_beat.mp3
+```
+
+| 폴더 | 내용 |
+| :--- | :--- |
+| `crates/beep-core` | 합성·인코딩 코어 (웹 WASM · 네이티브 공용) |
+| `crates/beep-cli` | 명령줄 도구 `beep-gen` |
+| `tools/parity_check.py` | Python 구현과 결과를 비교하는 검사 |
+| `spike/` | 템포 변환 사전 검증 코드 (제품 코드 아님) |
+
+옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-o`, `--format`), `--tts` 는 아직 없습니다. `-n` 은 소수(예: 1.4)를 받습니다.

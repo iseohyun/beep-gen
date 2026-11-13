@@ -1,0 +1,17 @@
+[package]
+name = "beep-core-spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rusty_mp3 = "1"
+symphonia = { version = "0.6", default-features = false, features = ["mp3", "wav", "pcm", "flac"] }
+timestretch = { version = "0.16", default-features = false, features = ["analysis"] }
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

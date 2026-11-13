@@ -1,0 +1,15 @@
+[package]
+name = "beep-cli"
+description = "beep-gen 명령줄 도구"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "beep-gen"
+path = "src/main.rs"
+
+[dependencies]
+beep-core = { path = "../beep-core", features = ["cli"] }
+clap = { version = "4.6.7", features = ["derive"] }

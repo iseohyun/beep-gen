@@ -28,3 +28,6 @@ dist/
 Thumbs.db
 [Dd]esktop.ini
 .DS_Store
+
+# Rust 빌드 아티팩트
+target/
