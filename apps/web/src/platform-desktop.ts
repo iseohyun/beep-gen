@@ -14,6 +14,7 @@ import type {
   MusicReport,
   Platform,
   ProgressInfo,
+  TtsSetup,
   Voice,
 } from "./platform";
 
@@ -50,6 +51,19 @@ export class DesktopPlatform implements Platform {
   listVoices(): Promise<Voice[]> {
     return call<Voice[]>("list_voices");
   }
+
+  // OS 에 내장된 음성을 쓰므로 따로 받을 것이 없다.
+  ttsSetup(): TtsSetup | null {
+    return null;
+  }
+
+  async ttsInstalled(): Promise<boolean> {
+    return true;
+  }
+
+  async installTts(): Promise<void> {}
+
+  async removeTts(): Promise<void> {}
 
   async generate(
     request: GenerateRequest,

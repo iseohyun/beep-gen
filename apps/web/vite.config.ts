@@ -17,6 +17,9 @@ function precacheManifest(): Plugin {
       const files = [...Object.keys(bundle), ...readdirSync(publicDir)]
         // 서비스 워커 자신은 브라우저가 따로 관리한다.
         .filter((name) => name !== "sw.js")
+        // 음성 합성 실행기(약 15MB)와 그 워커는 안내 음성을 쓰는 사람만 필요하므로
+        // 미리 받지 않는다. 처음 쓸 때 받아지고, 그 뒤에는 서비스 워커가 보관한다.
+        .filter((name) => !/ort-wasm|tts-worker/.test(name))
         .sort();
       this.emitFile({
         type: "asset",

@@ -60,15 +60,28 @@
 
         <div id="intro-section" class="field" hidden>
           <label for="intro-template">시작 안내 음성 (선택)</label>
-          <div class="field-control">
-            <input id="intro-template" type="text" maxlength="200" aria-describedby="intro-hint" />
+          <div id="intro-setup" class="setup" hidden>
+            <p id="intro-setup-text"></p>
+            <ul id="intro-setup-terms"></ul>
+            <p id="intro-setup-license" class="hint"></p>
+            <div class="actions">
+              <button id="intro-install" type="button"></button>
+            </div>
+            <progress id="intro-install-progress" max="100" value="0" hidden></progress>
+            <p id="intro-install-status" class="status" role="status" aria-live="polite"></p>
           </div>
-          <div class="field-control">
-            <select id="intro-voice" aria-label="안내 음성의 목소리">
-              <option value="">목소리 자동 선택</option>
-            </select>
+          <div id="intro-controls" hidden>
+            <div class="field-control">
+              <input id="intro-template" type="text" maxlength="200" aria-describedby="intro-hint" />
+            </div>
+            <div class="field-control">
+              <select id="intro-voice" aria-label="안내 음성의 목소리">
+                <option value="">목소리 자동 선택</option>
+              </select>
+            </div>
+            <p id="intro-hint" class="hint"></p>
+            <button id="intro-remove" type="button" class="link" hidden>내려받은 음성 모델 지우기</button>
           </div>
-          <p id="intro-hint" class="hint"></p>
         </div>
 
         <p id="tts-note" class="note" hidden></p>

@@ -65,6 +65,19 @@ export interface Voice {
   language: string;
 }
 
+/** 안내 음성을 쓰기 전에 사용자가 내려받아야 하는 것에 대한 안내. */
+export interface TtsSetup {
+  modelName: string;
+  /** 내려받을 크기(MB). */
+  sizeMB: number;
+  /** 어디서 받는지. */
+  source: string;
+  licenseName: string;
+  licenseUrl: string;
+  /** 사용자에게 알려야 하는 사용 조건. */
+  terms: readonly string[];
+}
+
 /** 배경 음악을 어디서 가져올지. */
 export type MusicSource = { kind: "file"; file: Blob } | { kind: "url"; url: string };
 
@@ -117,6 +130,14 @@ export interface Platform {
   describe(): Promise<AppInfo>;
   /** 안내 음성에 쓸 수 있는 음성 목록. TTS 를 지원하지 않으면 빈 목록. */
   listVoices(): Promise<Voice[]>;
+  /** 안내 음성을 쓰기 전에 내려받아야 하는 것. 바로 쓸 수 있는 환경이면 `null`. */
+  ttsSetup(): TtsSetup | null;
+  /** 안내 음성을 지금 바로 만들 수 있는지(필요한 것을 이미 받았는지). */
+  ttsInstalled(): Promise<boolean>;
+  /** 안내 음성에 필요한 것을 내려받는다. `onProgress` 는 0~100 의 백분율을 받는다. */
+  installTts(onProgress: (percent: number) => void): Promise<void>;
+  /** 내려받은 것을 지운다. */
+  removeTts(): Promise<void>;
   /** 음원을 만든다. */
   generate(
     request: GenerateRequest,

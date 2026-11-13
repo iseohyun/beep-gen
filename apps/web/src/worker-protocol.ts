@@ -2,6 +2,7 @@
 
 export type WorkerRequest =
   | { id: number; type: "describe" }
+  | { id: number; type: "introText"; template: string; paramsJson: string }
   | {
       id: number;
       type: "generate";
@@ -9,10 +10,13 @@ export type WorkerRequest =
       format: string;
       /** 배경 음악 파일의 내용. 없으면 비프만 만든다. */
       music: ArrayBuffer | null;
+      /** 안내 음성 파일의 내용. 없으면 안내 음성을 넣지 않는다. */
+      intro: ArrayBuffer | null;
     };
 
 export type WorkerResponse =
   | { id: number; type: "described"; infoJson: string }
+  | { id: number; type: "introText"; text: string }
   | { id: number; type: "progress"; percent: number; stage: string }
   | {
       id: number;

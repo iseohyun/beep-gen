@@ -14,6 +14,11 @@ pub const DEFAULT_INTRO_TEMPLATE: &str = "{n}초, {n}초 비프";
 
 /// 안내 음성과 비프 사이의 무음 길이(초).
 const PAUSE_AFTER_INTRO_SEC: f64 = 0.5;
+/// 안내 음성의 최대 진폭을 맞출 목표. 음성 합성기마다 크기가 제각각이라
+/// (작게는 최대 진폭의 20% 수준) 비프와 어울리도록 한 가지 크기로 맞춘다.
+const TARGET_PEAK: f32 = 0.9;
+/// 이보다 작은 소리는 무음으로 보고 키우지 않는다(잡음만 커지는 것을 막는다).
+const SILENCE_PEAK: f32 = 1e-4;
 
 /// 안내 문구의 자리표시자를 설정값으로 바꾼다. 앞뒤 공백은 지운다.
 ///
@@ -46,6 +51,15 @@ pub fn decode_intro(bytes: &[u8], sample_rate: u32) -> Result<Intro> {
         let mut resampler = StreamResampler::new(channels, ratio);
         resampler.push(&source.samples, &mut samples);
         resampler.finish(&mut samples);
+    }
+
+    // 음량 맞추기
+    let peak = samples.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+    if peak > SILENCE_PEAK {
+        let gain = TARGET_PEAK / peak;
+        for sample in &mut samples {
+            *sample *= gain;
+        }
     }
 
     let pause_frames = (PAUSE_AFTER_INTRO_SEC * f64::from(sample_rate)) as usize;
@@ -88,6 +102,35 @@ mod tests {
         );
         assert_eq!(intro_text(" {m}분할 {l}초 ", &params), "3분할 60초");
         assert_eq!(intro_text("", &params), "");
+    }
+
+    fn wav_of(samples: &[f32], rate: u32) -> Vec<u8> {
+        let mut wav = crate::encode::WavEncoder::new(rate, 1);
+        wav.push(samples);
+        wav.finish()
+    }
+
+    #[test]
+    fn quiet_and_loud_voices_end_up_at_the_same_level() {
+        let tone = |amplitude: f64| -> Vec<f32> {
+            (0..4410)
+                .map(|i| (libm::sin(f64::from(i) * 0.1) * amplitude) as f32)
+                .collect()
+        };
+        for amplitude in [0.05, 0.2, 1.0] {
+            let intro = decode_intro(&wav_of(&tone(amplitude), 44_100), 44_100).unwrap();
+            let peak = intro
+                .into_interleaved(1)
+                .iter()
+                .fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!((peak - TARGET_PEAK).abs() < 0.01, "{amplitude} → {peak}");
+        }
+    }
+
+    #[test]
+    fn silence_is_not_amplified() {
+        let intro = decode_intro(&wav_of(&[0.0; 1000], 44_100), 44_100).unwrap();
+        assert!(intro.into_interleaved(1).iter().all(|v| *v == 0.0));
     }
 
     #[test]

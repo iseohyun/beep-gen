@@ -302,3 +302,46 @@ progress {
   border-radius: var(--radius-small);
   font-size: 14px;
 }
+
+/* ── 안내 음성 모델 내려받기 안내 ───────────────────────── */
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--note-bg);
+  border-radius: var(--radius-small);
+  font-size: 14px;
+}
+
+.setup p,
+.setup ul {
+  margin: 0;
+}
+
+.setup ul {
+  padding-left: 20px;
+}
+
+.setup a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#intro-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 글자처럼 보이는 보조 버튼 */
+button.link {
+  align-self: flex-start;
+  height: auto;
+  padding: 4px 0;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: underline;
+}

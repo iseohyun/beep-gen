@@ -183,6 +183,15 @@ async function start(platform: Platform): Promise<void> {
   const introTemplate = byId<HTMLInputElement>("intro-template");
   const introVoice = byId<HTMLSelectElement>("intro-voice");
   const introHint = byId("intro-hint");
+  const introSetup = byId("intro-setup");
+  const introSetupText = byId("intro-setup-text");
+  const introSetupTerms = byId("intro-setup-terms");
+  const introSetupLicense = byId("intro-setup-license");
+  const introInstall = byId<HTMLButtonElement>("intro-install");
+  const introInstallProgress = byId<HTMLProgressElement>("intro-install-progress");
+  const introInstallStatus = byId("intro-install-status");
+  const introControls = byId("intro-controls");
+  const introRemove = byId<HTMLButtonElement>("intro-remove");
   const generateButton = byId<HTMLButtonElement>("generate");
   const resetButton = byId<HTMLButtonElement>("reset");
   const progress = byId<HTMLProgressElement>("progress");
@@ -240,6 +249,8 @@ async function start(platform: Platform): Promise<void> {
   // 기능이 있는 환경에서만 해당 입력을 보여주고, 없으면 그 사실과 대안을 알려준다.
   musicSection.hidden = !capabilities.musicFile;
   introSection.hidden = !capabilities.ttsIntro;
+  /** 안내 음성을 지금 바로 만들 수 있는지(필요한 것을 받아 두었는지). */
+  let introReady = false;
   if (capabilities.ttsIntro) {
     introTemplate.value = saved.introTemplate ?? info.intro.default_template;
     introHint.textContent = info.intro.hint;
@@ -253,6 +264,63 @@ async function start(platform: Platform): Promise<void> {
     } catch (error) {
       introHint.textContent = `음성 목록을 읽지 못했습니다: ${errorMessage(error)}`;
     }
+
+    // 음성 모델을 먼저 받아야 하는 환경이면, 받기 전에는 안내와 내려받기 버튼을 보여준다.
+    const setup = platform.ttsSetup();
+    const showIntroState = (): void => {
+      introSetup.hidden = introReady;
+      introControls.hidden = !introReady;
+      introRemove.hidden = !introReady || setup === null;
+    };
+    introReady = await platform.ttsInstalled().catch(() => false);
+    if (setup) {
+      introSetupText.textContent =
+        `음성 모델 ${setup.modelName}(약 ${setup.sizeMB}MB)을 ${setup.source}에서 한 번 내려받으면 ` +
+        "이 브라우저 안에서 안내 음성을 만들 수 있습니다. 내려받을 때 이 기기의 접속 정보가 그 사이트에 전달됩니다. " +
+        "안내 문구와 만든 음성은 기기 밖으로 나가지 않습니다.";
+      introSetupTerms.replaceChildren(...setup.terms.map((term) => el("li", {}, term)));
+      introSetupLicense.replaceChildren(
+        `모델에는 ${setup.licenseName} 사용 조건이 적용됩니다. 내려받으면 이 조건에 동의하는 것으로 봅니다. `,
+        el("a", { href: setup.licenseUrl, target: "_blank", rel: "noopener" }, "조건 전문 보기"),
+      );
+      introInstall.textContent = `음성 모델 내려받기 (약 ${setup.sizeMB}MB)`;
+
+      introInstall.addEventListener("click", async () => {
+        introInstall.disabled = true;
+        introInstallProgress.hidden = false;
+        introInstallProgress.value = 0;
+        introInstallStatus.className = "status";
+        introInstallStatus.textContent = "내려받는 중… 0%";
+        try {
+          await platform.installTts((percent) => {
+            introInstallProgress.value = percent;
+            introInstallStatus.textContent = `내려받는 중… ${percent}%`;
+          });
+          introReady = true;
+          introInstallStatus.textContent = "";
+          showIntroState();
+        } catch (error) {
+          introInstallStatus.className = "status error";
+          introInstallStatus.textContent =
+            `${errorMessage(error)} 다시 누르면 받은 데까지는 건너뛰고 이어서 받습니다.`;
+        } finally {
+          introInstall.disabled = false;
+          introInstallProgress.hidden = true;
+        }
+      });
+
+      introRemove.addEventListener("click", async () => {
+        introRemove.disabled = true;
+        try {
+          await platform.removeTts();
+          introReady = false;
+          showIntroState();
+        } finally {
+          introRemove.disabled = false;
+        }
+      });
+    }
+    showIntroState();
   } else {
     ttsNote.hidden = false;
     ttsNote.replaceChildren(
@@ -263,7 +331,7 @@ async function start(platform: Platform): Promise<void> {
   }
 
   const selectedIntro = (): IntroOptions | null => {
-    if (!capabilities.ttsIntro) return null;
+    if (!capabilities.ttsIntro || !introReady) return null;
     const template = introTemplate.value.trim();
     if (!template) return null;
     return { template, voiceId: introVoice.value || undefined };

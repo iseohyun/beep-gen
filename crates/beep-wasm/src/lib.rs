@@ -51,23 +51,31 @@ impl TrackResult {
     }
 }
 
+/// 안내 문구의 자리표시자({n}, {m}, {l})를 설정값으로 바꾼다.
+/// 음성 합성기에 넘길 최종 문구를 만들 때 쓴다. 비어 있으면 안내 음성을 넣지 않는다는 뜻이다.
+#[wasm_bindgen]
+pub fn intro_text(template: &str, params_json: &str) -> Result<String, JsError> {
+    Ok(beep_core::intro_text(template, &parse_params(params_json)?))
+}
+
 /// 음원을 만든다.
 ///
 /// `music` 에 음악 파일 바이트를 주면 비프 템포에 맞춰 함께 넣는다.
+/// `intro` 에 안내 음성 파일 바이트를 주면 맨 앞에 넣는다.
 /// `on_progress(percent, stageKey, stageLabel)` 는 진행 상황이 바뀔 때마다 호출된다.
 #[wasm_bindgen]
 pub fn build_track(
     params_json: &str,
     format: &str,
     music: Option<Vec<u8>>,
+    intro: Option<Vec<u8>>,
     on_progress: &js_sys::Function,
 ) -> Result<TrackResult, JsError> {
     let params = parse_params(params_json)?;
     let format = parse_format(format)?;
     let inputs = TrackInputs {
         music: music.as_deref(),
-        // 브라우저에는 음성을 만들 방법이 아직 없다(이후 단계에서 추가).
-        intro: None,
+        intro: intro.as_deref(),
     };
     let mut last = None;
     let output = beep_core::build_track(&params, format, inputs, |progress| {

@@ -97,6 +97,8 @@ target/release/beep-gen --list-voices
 
 브라우저 안에서 같은 코어(WASM)로 음원을 만듭니다. 서버로 아무것도 보내지 않으며, 한 번 연 뒤에는 오프라인에서도 동작합니다.
 
+시작 안내 음성(TTS)은 PC 브라우저에서 선택 기능으로 쓸 수 있습니다. 화면의 안내에 따라 음성 모델(Supertonic 2, 약 264MB)을 한 번 내려받으면 그 뒤로는 브라우저 안에서 음성을 만듭니다. 모델은 Hugging Face에서 받으며 [OpenRAIL-M 사용 조건](https://huggingface.co/Supertone/supertonic-2/blob/main/LICENSE)이 적용됩니다. 휴대폰에서는 메모리 한계 때문에 제공하지 않습니다.
+
 ```bash
 cd apps/web
 npm install
