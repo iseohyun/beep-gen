@@ -9,8 +9,10 @@ import type {
   GenerateRequest,
   GeneratedTrack,
   MusicReport,
+  MusicSource,
   Platform,
   ProgressInfo,
+  SongGuess,
   TtsSetup,
   Voice,
 } from "./platform";
@@ -197,6 +199,20 @@ export class WebPlatform implements Platform {
     }
   }
 
+  // ── 가수와 곡 찾기 ──────────────────────────────────────
+
+  // 웹에서는 파일의 태그와 파일 이름만 본다(로컬 AI 는 로컬앱에서만 쓴다).
+  async identifyMusic(music: MusicSource): Promise<SongGuess> {
+    if (music.kind === "url") return { artist: null, title: null, by: null };
+    const buffer = await music.file.arrayBuffer();
+    const response = await this.request(
+      { type: "identify", music: buffer, sourceName: music.name },
+      [buffer],
+    );
+    if (response.type !== "identified") throw new Error("예상하지 못한 응답입니다.");
+    return JSON.parse(response.guessJson) as SongGuess;
+  }
+
   // ── 음원 생성 ───────────────────────────────────────────
 
   async generate(
@@ -220,6 +236,9 @@ export class WebPlatform implements Platform {
         paramsJson,
         format: request.format,
         music: musicBuffer,
+        musicNameJson: request.music
+          ? JSON.stringify({ song: request.song, source_name: request.music.name })
+          : null,
         intro: introBuffer,
       },
       transfer,

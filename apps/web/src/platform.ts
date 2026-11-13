@@ -78,8 +78,28 @@ export interface TtsSetup {
   terms: readonly string[];
 }
 
-/** 배경 음악을 어디서 가져올지. */
-export type MusicSource = { kind: "file"; file: Blob } | { kind: "url"; url: string };
+/** 배경 음악을 어디서 가져올지. `name` 은 고른 파일의 원래 이름이다. */
+export type MusicSource =
+  | { kind: "file"; file: Blob; name: string }
+  | { kind: "url"; url: string };
+
+/** 결과 파일의 이름에 넣을 가수와 곡 제목. 모르는 쪽은 빈 문자열. */
+export interface SongInput {
+  artist: string;
+  title: string;
+}
+
+/** 배경 음악의 가수와 곡 제목에 대한 추정. */
+export interface SongGuess {
+  artist: string | null;
+  title: string | null;
+  /** 알아낸 곳: 파일의 태그, 파일 이름, 로컬 AI. 알아내지 못했으면 `null`. */
+  by: "tags" | "file-name" | "ai" | null;
+  /** 로컬 AI 가 답했을 때 그 모델의 이름. */
+  model?: string | null;
+  /** 로컬 AI 에 물었지만 실패했을 때의 이유. */
+  problem?: string | null;
+}
 
 /** 시작 안내 음성 설정. */
 export interface IntroOptions {
@@ -93,6 +113,8 @@ export interface GenerateRequest {
   params: ParamValues;
   format: string;
   music: MusicSource | null;
+  /** 배경 음악의 가수와 곡 제목(사용자가 확인한 값). 결과 파일의 이름에 쓴다. */
+  song: SongInput;
   intro: IntroOptions | null;
 }
 
@@ -138,6 +160,11 @@ export interface Platform {
   installTts(onProgress: (percent: number) => void): Promise<void>;
   /** 내려받은 것을 지운다. */
   removeTts(): Promise<void>;
+  /**
+   * 배경 음악의 가수와 곡 제목을 알아낸다. 알아내지 못하면 지어내지 않고 빈 값을 돌려준다.
+   * 환경에 따라 찾는 범위가 다르다(로컬앱은 로컬 AI 에도 묻는다).
+   */
+  identifyMusic(music: MusicSource): Promise<SongGuess>;
   /** 음원을 만든다. */
   generate(
     request: GenerateRequest,

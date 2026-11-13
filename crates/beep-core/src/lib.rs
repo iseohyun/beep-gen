@@ -10,6 +10,7 @@ pub mod encode;
 pub mod error;
 pub mod intro;
 pub mod music;
+pub mod naming;
 pub mod params;
 pub mod resample;
 pub mod synth;
@@ -19,6 +20,7 @@ pub use encode::OutputFormat;
 pub use error::{Error, Result};
 pub use intro::{DEFAULT_INTRO_TEMPLATE, intro_text};
 pub use music::MusicReport;
+pub use naming::{MusicName, SongGuess, SongInfo, SongSource, identify_song, output_file_name};
 pub use params::{ParamKind, ParamSpec, ParamWhen, TrackParams, param_specs};
 
 use encode::Encoder;
@@ -234,47 +236,9 @@ fn percent_of(done: u64, total: u64, start: u64) -> u8 {
     (start + part) as u8
 }
 
-/// 기본 출력 파일 이름. 예: `beep_n1.4s_m2_l300s.mp3`, 음악이 있으면 `beep_n1.4s_m2_music.mp3`
-pub fn default_file_name(params: &TrackParams, format: OutputFormat, with_music: bool) -> String {
-    let tail = if with_music {
-        "music".to_owned()
-    } else {
-        format!("l{}s", params.length_sec)
-    };
-    format!(
-        "beep_n{}s_m{}_{}.{}",
-        params.interval_label(),
-        params.subdivision,
-        tail,
-        format.extension()
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_file_name_matches_legacy_pattern() {
-        let params = TrackParams::default();
-        assert_eq!(
-            default_file_name(&params, OutputFormat::Mp3, false),
-            "beep_n1s_m2_l300s.mp3"
-        );
-        let params = TrackParams {
-            interval_sec: 1.4,
-            length_sec: 60,
-            ..params
-        };
-        assert_eq!(
-            default_file_name(&params, OutputFormat::Wav, false),
-            "beep_n1.4s_m2_l60s.wav"
-        );
-        assert_eq!(
-            default_file_name(&params, OutputFormat::Mp3, true),
-            "beep_n1.4s_m2_music.mp3"
-        );
-    }
 
     #[test]
     fn build_wav_has_expected_size_and_reports_progress() {

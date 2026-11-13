@@ -12,8 +12,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use beep_core::{DEFAULT_INTRO_TEMPLATE, MusicReport, OutputFormat, TrackParams};
-use beep_native::job::{self, IntroRequest, JobError, JobRequest, MusicSource};
+use beep_core::{DEFAULT_INTRO_TEMPLATE, MusicReport, OutputFormat, SongInfo, TrackParams};
+use beep_native::job::{self, IntroRequest, JobError, JobRequest, MusicSource, SongLookup};
 use beep_native::tts;
 use clap::{Args, Parser, Subcommand};
 
@@ -56,7 +56,20 @@ struct GenerateArgs {
     #[arg(long = "list-voices")]
     list_voices: bool,
 
-    /// 저장할 파일 경로. 생략하면 설정값으로 이름을 만든다.
+    /// 배경 음악의 가수. 파일 이름에 쓴다. 생략하면 음악 파일의 정보에서 찾는다.
+    #[arg(long = "artist")]
+    artist: Option<String>,
+
+    /// 배경 음악의 곡 제목. 파일 이름에 쓴다. 생략하면 음악 파일의 정보에서 찾는다.
+    #[arg(long = "title")]
+    title: Option<String>,
+
+    /// 가수와 곡을 찾지 못해도 로컬 AI(Ollama)에 묻지 않는다.
+    #[arg(long = "no-ai")]
+    no_ai: bool,
+
+    /// 저장할 파일 경로. 생략하면 "[주기초] 가수 - 곡.mp3" 꼴로 이름을 짓는다
+    /// (음악이 없으면 "[주기초] beep.mp3", 곡을 모르면 원래 음악 파일의 이름).
     #[arg(short = 'o', long = "output")]
     output: Option<PathBuf>,
 
@@ -112,13 +125,19 @@ fn generate(args: GenerateArgs) -> Result<(), Failure> {
         })
         .unwrap_or_default();
     let request = JobRequest {
-        params: args.params,
-        format,
         music: args.music.as_deref().map(MusicSource::parse),
         intro: Some(IntroRequest {
             template: args.tts,
             voice: args.tts_voice,
         }),
+        song: SongInfo::new(args.artist.as_deref(), args.title.as_deref()),
+        // 저장 경로를 직접 줬으면 이름을 지을 일이 없으므로 찾지 않는다.
+        song_lookup: match (&args.output, args.no_ai) {
+            (Some(_), _) => SongLookup::Given,
+            (None, true) => SongLookup::Detect,
+            (None, false) => SongLookup::DetectWithAi,
+        },
+        ..JobRequest::new(args.params, format)
     };
 
     let quiet = args.quiet;
