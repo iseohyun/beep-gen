@@ -143,6 +143,11 @@ body {
   gap: 8px;
 }
 
+/* 한 항목 안에 입력 줄이 여럿일 때(파일 + 주소, 문구 + 목소리)의 간격 */
+.field-control + .field-control {
+  margin-top: 2px;
+}
+
 .field input,
 .field select {
   flex: 1;

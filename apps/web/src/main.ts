@@ -7,18 +7,24 @@ import "./styles/app.css";
 import type {
   AppInfo,
   GeneratedTrack,
+  IntroOptions,
   MusicReport,
+  MusicSource,
   ParamSpec,
   ParamValues,
   Platform,
 } from "./platform";
-import { WebPlatform } from "./platform-web";
 import { APP_VERSION, BUILD_TAG } from "./version";
 
 const STORAGE_KEY = "beep-gen.settings.v1";
 const LOCAL_APP_URL = "https://github.com/iseohyun/beep-gen";
 
-type SavedSettings = { params: ParamValues; format: string };
+type SavedSettings = {
+  params: ParamValues;
+  format: string;
+  introTemplate?: string;
+  introVoiceId?: string;
+};
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -61,6 +67,10 @@ function formatBytes(bytes: number): string {
 function formatDuration(seconds: number): string {
   const whole = Math.round(seconds);
   return `${Math.floor(whole / 60)}분 ${String(whole % 60).padStart(2, "0")}초`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** 파라미터 하나의 입력 칸을 만든다. */
@@ -132,30 +142,31 @@ function readParams(form: HTMLFormElement, info: AppInfo): ParamValues | null {
   return values;
 }
 
-/** 배경 음악을 어떻게 맞췄는지 보여준다. */
-function renderMusicReport(container: HTMLElement, report: MusicReport | undefined): void {
+/** 배경 음악을 어떻게 맞췄는지와 알림을 보여준다. */
+function renderReport(container: HTMLElement, track: GeneratedTrack): void {
   container.replaceChildren();
-  container.hidden = !report;
-  if (!report) return;
-
-  const change = report.tempo_change_pct;
-  const rows: [string, string][] = [
-    [
-      "검출한 템포",
-      `${report.detected_bpm.toFixed(1)} BPM (신뢰도 ${Math.round(report.beat_confidence * 100)}%)`,
-    ],
-    ["템포 변화", `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`],
-    ["한 박의 길이", `${report.target_beat_sec.toFixed(3)}초`],
-    ["길이", `${formatDuration(report.source_seconds)} → ${formatDuration(report.output_seconds)}`],
-  ];
-  const list = el("dl", { className: "report" });
-  for (const [term, value] of rows) {
-    list.append(el("dt", {}, term), el("dd", {}, value));
+  const report: MusicReport | undefined = track.musicReport;
+  if (report) {
+    const change = report.tempo_change_pct;
+    const rows: [string, string][] = [
+      [
+        "검출한 템포",
+        `${report.detected_bpm.toFixed(1)} BPM (신뢰도 ${Math.round(report.beat_confidence * 100)}%)`,
+      ],
+      ["템포 변화", `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`],
+      ["한 박의 길이", `${report.target_beat_sec.toFixed(3)}초`],
+      ["길이", `${formatDuration(report.source_seconds)} → ${formatDuration(report.output_seconds)}`],
+    ];
+    const list = el("dl", { className: "report" });
+    for (const [term, value] of rows) {
+      list.append(el("dt", {}, term), el("dd", {}, value));
+    }
+    container.append(list);
   }
-  container.append(list);
-  for (const warning of report.warnings) {
-    container.append(el("p", { className: "warning" }, warning));
+  for (const text of [...track.notices, ...(report?.warnings ?? [])]) {
+    container.append(el("p", { className: "warning" }, text));
   }
+  container.hidden = container.childElementCount === 0;
 }
 
 async function start(platform: Platform): Promise<void> {
@@ -166,6 +177,12 @@ async function start(platform: Platform): Promise<void> {
   const musicSection = byId("music-section");
   const musicInput = byId<HTMLInputElement>("music");
   const musicClear = byId<HTMLButtonElement>("music-clear");
+  const musicUrlRow = byId("music-url-row");
+  const musicUrl = byId<HTMLInputElement>("music-url");
+  const introSection = byId("intro-section");
+  const introTemplate = byId<HTMLInputElement>("intro-template");
+  const introVoice = byId<HTMLSelectElement>("intro-voice");
+  const introHint = byId("intro-hint");
   const generateButton = byId<HTMLButtonElement>("generate");
   const resetButton = byId<HTMLButtonElement>("reset");
   const progress = byId<HTMLProgressElement>("progress");
@@ -173,9 +190,10 @@ async function start(platform: Platform): Promise<void> {
   const result = byId("result");
   const player = byId<HTMLAudioElement>("player");
   const resultName = byId("result-name");
-  const musicReport = byId("music-report");
+  const reportBox = byId("music-report");
   const downloadButton = byId<HTMLButtonElement>("download");
   const ttsNote = byId("tts-note");
+  const capabilities = platform.capabilities;
 
   byId("version").textContent = `v${APP_VERSION} · 빌드 ${BUILD_TAG}`;
 
@@ -183,16 +201,24 @@ async function start(platform: Platform): Promise<void> {
   try {
     info = await platform.describe();
   } catch (error) {
-    status.textContent = `시작하지 못했습니다: ${error instanceof Error ? error.message : error}`;
+    status.textContent = `시작하지 못했습니다: ${errorMessage(error)}`;
     status.className = "status error";
     return;
   }
 
-  const selectedMusic = (): File | null => musicInput.files?.[0] ?? null;
+  /** 지금 고른 배경 음악. 파일이 주소보다 우선한다. */
+  const selectedMusic = (): MusicSource | null => {
+    const file = musicInput.files?.[0];
+    if (file) return { kind: "file", file };
+    const url = capabilities.musicUrl ? musicUrl.value.trim() : "";
+    return url ? { kind: "url", url } : null;
+  };
   const refreshMusicState = (): void => {
-    const hasMusic = selectedMusic() !== null;
-    musicClear.hidden = !hasMusic;
-    applyMusicState(form, hasMusic);
+    const hasFile = Boolean(musicInput.files?.[0]);
+    musicClear.hidden = !hasFile;
+    // 파일을 골랐으면 주소 칸은 쓰이지 않으므로 숨긴다.
+    musicUrlRow.hidden = !capabilities.musicUrl || hasFile;
+    applyMusicState(form, selectedMusic() !== null);
   };
 
   const saved = loadSettings();
@@ -212,17 +238,39 @@ async function start(platform: Platform): Promise<void> {
   render(saved.params ?? {}, saved.format ?? "");
 
   // 기능이 있는 환경에서만 해당 입력을 보여주고, 없으면 그 사실과 대안을 알려준다.
-  musicSection.hidden = !platform.capabilities.musicFile;
-  if (!platform.capabilities.ttsIntro) {
+  musicSection.hidden = !capabilities.musicFile;
+  introSection.hidden = !capabilities.ttsIntro;
+  if (capabilities.ttsIntro) {
+    introTemplate.value = saved.introTemplate ?? info.intro.default_template;
+    introHint.textContent = info.intro.hint;
+    try {
+      for (const voice of await platform.listVoices()) {
+        introVoice.append(el("option", { value: voice.id }, `${voice.name} (${voice.language})`));
+      }
+      if (saved.introVoiceId) introVoice.value = saved.introVoiceId;
+      // 저장해 둔 음성이 지금은 없으면 자동 선택으로 되돌린다.
+      if (introVoice.selectedIndex < 0) introVoice.value = "";
+    } catch (error) {
+      introHint.textContent = `음성 목록을 읽지 못했습니다: ${errorMessage(error)}`;
+    }
+  } else {
     ttsNote.hidden = false;
     ttsNote.replaceChildren(
       "시작 안내 음성(TTS)은 이 환경에서 넣을 수 없습니다. ",
       el("a", { href: LOCAL_APP_URL, target: "_blank", rel: "noopener" }, "로컬앱"),
-      "에서 지원할 예정입니다.",
+      "에서 지원합니다.",
     );
   }
 
+  const selectedIntro = (): IntroOptions | null => {
+    if (!capabilities.ttsIntro) return null;
+    const template = introTemplate.value.trim();
+    if (!template) return null;
+    return { template, voiceId: introVoice.value || undefined };
+  };
+
   musicInput.addEventListener("change", refreshMusicState);
+  musicUrl.addEventListener("input", refreshMusicState);
   musicClear.addEventListener("click", () => {
     musicInput.value = "";
     refreshMusicState();
@@ -232,10 +280,9 @@ async function start(platform: Platform): Promise<void> {
   let playerUrl: string | null = null;
 
   const setBusy = (busy: boolean): void => {
-    generateButton.disabled = busy;
-    resetButton.disabled = busy;
-    musicInput.disabled = busy;
-    musicClear.disabled = busy;
+    for (const control of [generateButton, resetButton, musicInput, musicClear, musicUrl]) {
+      control.disabled = busy;
+    }
     progress.hidden = !busy;
     form.setAttribute("aria-busy", String(busy));
   };
@@ -245,7 +292,12 @@ async function start(platform: Platform): Promise<void> {
     const params = readParams(form, info);
     if (!params) return;
     const format = formatSelect.value;
-    saveSettings({ params, format });
+    saveSettings({
+      params,
+      format,
+      introTemplate: capabilities.ttsIntro ? introTemplate.value : saved.introTemplate,
+      introVoiceId: capabilities.ttsIntro ? introVoice.value : saved.introVoiceId,
+    });
 
     setBusy(true);
     progress.value = 0;
@@ -253,32 +305,48 @@ async function start(platform: Platform): Promise<void> {
     status.textContent = "음원을 만드는 중입니다…";
     const startedAt = performance.now();
     try {
-      track = await platform.generate(params, format, selectedMusic(), (update) => {
-        progress.value = update.percent;
-        status.textContent = `${update.stage}… ${update.percent}%`;
-      });
+      track = await platform.generate(
+        { params, format, music: selectedMusic(), intro: selectedIntro() },
+        (update) => {
+          progress.value = update.percent;
+          status.textContent = `${update.stage}… ${update.percent}%`;
+        },
+      );
       if (playerUrl) URL.revokeObjectURL(playerUrl);
       playerUrl = URL.createObjectURL(new Blob([track.bytes], { type: track.mime }));
       player.src = playerUrl;
       resultName.textContent = `${track.fileName} (${formatBytes(track.bytes.length)})`;
-      renderMusicReport(musicReport, track.musicReport);
+      renderReport(reportBox, track);
       result.hidden = false;
       const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
       status.textContent = `완료했습니다 (${seconds}초).`;
     } catch (error) {
       status.className = "status error";
-      status.textContent = error instanceof Error ? error.message : String(error);
+      status.textContent = errorMessage(error);
     } finally {
       setBusy(false);
     }
   });
 
-  downloadButton.addEventListener("click", () => {
-    if (track) void platform.save(track);
+  downloadButton.addEventListener("click", async () => {
+    if (!track) return;
+    try {
+      if (await platform.save(track)) {
+        status.className = "status";
+        status.textContent = "저장했습니다.";
+      }
+    } catch (error) {
+      status.className = "status error";
+      status.textContent = errorMessage(error);
+    }
   });
 
   resetButton.addEventListener("click", () => {
     render({}, "");
+    if (capabilities.ttsIntro) {
+      introTemplate.value = info.intro.default_template;
+      introVoice.value = "";
+    }
     status.className = "status";
     status.textContent = "기본값으로 되돌렸습니다.";
   });
@@ -286,16 +354,35 @@ async function start(platform: Platform): Promise<void> {
   generateButton.disabled = false;
 }
 
-function registerServiceWorker(): void {
+function registerServiceWorker(platform: Platform): void {
   // 개발 서버에서는 캐시가 수정 내용을 가리지 않도록 등록하지 않는다.
-  if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
-  window.addEventListener("load", () => {
+  if (!platform.capabilities.offlineCache || !import.meta.env.PROD) return;
+  if (!("serviceWorker" in navigator)) return;
+  const register = (): void => {
     // 빌드 태그가 바뀌면 주소가 달라져 브라우저가 새 서비스 워커를 설치한다.
     navigator.serviceWorker.register(`./sw.js?v=${BUILD_TAG}`).catch(() => {
       // 오프라인 캐시는 부가 기능이라 실패해도 앱은 그대로 동작한다.
     });
-  });
+  };
+  // 플랫폼을 고르는 동안 페이지 로딩이 이미 끝났을 수 있다. 그때는 바로 등록한다.
+  if (document.readyState === "complete") register();
+  else window.addEventListener("load", register, { once: true });
 }
 
-void start(new WebPlatform());
-registerServiceWorker();
+/**
+ * 실행 환경에 맞는 플랫폼 구현을 고른다.
+ * 환경을 직접 확인하는 곳은 여기 한 군데뿐이다. 화면 코드는 `capabilities` 만 본다.
+ */
+async function createPlatform(): Promise<Platform> {
+  if ("__TAURI_INTERNALS__" in window) {
+    const { DesktopPlatform } = await import("./platform-desktop");
+    return new DesktopPlatform();
+  }
+  const { WebPlatform } = await import("./platform-web");
+  return new WebPlatform();
+}
+
+void createPlatform().then((platform) => {
+  registerServiceWorker(platform);
+  return start(platform);
+});

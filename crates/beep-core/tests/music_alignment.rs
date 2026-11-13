@@ -4,7 +4,7 @@
 //! "음악만" 과 "비프만" 두 결과에서 박의 시작 시각을 찾아 비교한다.
 
 use beep_core::encode::WavEncoder;
-use beep_core::{OutputFormat, TrackParams, build_track};
+use beep_core::{OutputFormat, TrackInputs, TrackParams, build_track};
 
 const RATE: u32 = 44_100;
 const SOURCE_BPM: f64 = 100.0;
@@ -103,7 +103,10 @@ fn music_beats_stay_on_the_beep_grid() {
             ..base.clone()
         },
         OutputFormat::Wav,
-        Some(&music),
+        TrackInputs {
+            music: Some(&music),
+            ..TrackInputs::default()
+        },
         |_| {},
     )
     .unwrap();
@@ -113,7 +116,10 @@ fn music_beats_stay_on_the_beep_grid() {
             ..base.clone()
         },
         OutputFormat::Wav,
-        Some(&music),
+        TrackInputs {
+            music: Some(&music),
+            ..TrackInputs::default()
+        },
         |_| {},
     )
     .unwrap();
@@ -193,7 +199,10 @@ fn music_without_a_beat_is_rejected() {
     let result = build_track(
         &TrackParams::default(),
         OutputFormat::Wav,
-        Some(&wav),
+        TrackInputs {
+            music: Some(&wav),
+            ..TrackInputs::default()
+        },
         |_| {},
     );
     assert_eq!(result.unwrap_err(), beep_core::Error::TempoNotFound);

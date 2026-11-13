@@ -3,7 +3,7 @@
 //! 자바스크립트와 값을 주고받는 일만 한다. 소리를 만드는 계산은 전부 코어에 있다.
 //! 파라미터는 JSON 문자열로 받는다. 필드 이름은 CLI 옵션 이름과 같다(예: `weak-volume`).
 
-use beep_core::{OutputFormat, TrackParams};
+use beep_core::{OutputFormat, TrackInputs, TrackParams};
 use wasm_bindgen::prelude::*;
 
 fn parse_params(params_json: &str) -> Result<TrackParams, JsError> {
@@ -16,25 +16,10 @@ fn parse_format(format: &str) -> Result<OutputFormat, JsError> {
 }
 
 /// 화면을 그리는 데 필요한 정보를 JSON 으로 돌려준다:
-/// 버전, 파라미터 명세(이름·기본값·범위), 출력 형식 목록.
+/// 버전, 파라미터 명세(이름·기본값·범위), 출력 형식 목록, 안내 음성 정보.
 #[wasm_bindgen]
 pub fn describe() -> String {
-    let formats: Vec<serde_json::Value> = OutputFormat::ALL
-        .iter()
-        .map(|f| {
-            serde_json::json!({
-                "id": f.extension(),
-                "label": f.label(),
-                "mime": f.mime_type(),
-            })
-        })
-        .collect();
-    serde_json::json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "params": beep_core::param_specs(),
-        "formats": formats,
-    })
-    .to_string()
+    serde_json::to_string(&beep_core::describe()).unwrap_or_default()
 }
 
 /// 만들어진 음원.
@@ -79,8 +64,13 @@ pub fn build_track(
 ) -> Result<TrackResult, JsError> {
     let params = parse_params(params_json)?;
     let format = parse_format(format)?;
+    let inputs = TrackInputs {
+        music: music.as_deref(),
+        // 브라우저에는 음성을 만들 방법이 아직 없다(이후 단계에서 추가).
+        intro: None,
+    };
     let mut last = None;
-    let output = beep_core::build_track(&params, format, music.as_deref(), |progress| {
+    let output = beep_core::build_track(&params, format, inputs, |progress| {
         if last != Some(progress) {
             last = Some(progress);
             // 진행 표시 실패는 음원 생성과 무관하므로 무시한다.

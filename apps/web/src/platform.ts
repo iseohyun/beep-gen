@@ -27,11 +27,18 @@ export interface FormatInfo {
   mime: string;
 }
 
-/** 코어가 알려주는 화면 구성 정보. */
+/** 시작 안내 음성에 대한 정보. */
+export interface IntroInfo {
+  default_template: string;
+  hint: string;
+}
+
+/** 코어가 알려주는 화면 구성 정보. 코어(Rust)의 `AppInfo` 와 같은 모양이다. */
 export interface AppInfo {
   version: string;
   params: ParamSpec[];
   formats: FormatInfo[];
+  intro: IntroInfo;
 }
 
 /** 파라미터 값. 키는 `ParamSpec.key`. */
@@ -51,12 +58,39 @@ export interface MusicReport {
   warnings: string[];
 }
 
+/** 고를 수 있는 음성 하나. */
+export interface Voice {
+  id: string;
+  name: string;
+  language: string;
+}
+
+/** 배경 음악을 어디서 가져올지. */
+export type MusicSource = { kind: "file"; file: Blob } | { kind: "url"; url: string };
+
+/** 시작 안내 음성 설정. */
+export interface IntroOptions {
+  /** 읽을 문구. `{n}`, `{m}` 은 설정값으로 바뀐다. */
+  template: string;
+  /** 쓸 음성. 생략하면 문구의 언어에 맞는 기본 음성을 쓴다. */
+  voiceId?: string;
+}
+
+export interface GenerateRequest {
+  params: ParamValues;
+  format: string;
+  music: MusicSource | null;
+  intro: IntroOptions | null;
+}
+
 export interface GeneratedTrack {
   bytes: Uint8Array<ArrayBuffer>;
   fileName: string;
   mime: string;
   /** 배경 음악을 넣었을 때만 있다. */
   musicReport?: MusicReport;
+  /** 음원은 만들었지만 사용자가 알아야 할 일(예: 안내 음성을 넣지 못함). */
+  notices: string[];
 }
 
 /** 진행 상황. `stage` 는 사람이 읽는 단계 설명이다. */
@@ -69,25 +103,25 @@ export interface ProgressInfo {
 export interface Capabilities {
   /** 배경 음악 파일을 고를 수 있는지. */
   musicFile: boolean;
+  /** 음악을 주소(URL)로 가져올 수 있는지. */
+  musicUrl: boolean;
   /** TTS 인트로 음성을 음원에 넣을 수 있는지. */
   ttsIntro: boolean;
-  /** URL 로 음악을 가져올 수 있는지. */
-  urlInput: boolean;
+  /** 서비스 워커로 오프라인 캐시를 둘 환경인지(웹 브라우저). */
+  offlineCache: boolean;
 }
 
 export interface Platform {
   readonly capabilities: Capabilities;
   /** 화면 구성 정보를 가져온다. */
   describe(): Promise<AppInfo>;
-  /**
-   * 음원을 만든다. `music` 에 음악 파일을 주면 비프 템포에 맞춰 함께 넣는다.
-   */
+  /** 안내 음성에 쓸 수 있는 음성 목록. TTS 를 지원하지 않으면 빈 목록. */
+  listVoices(): Promise<Voice[]>;
+  /** 음원을 만든다. */
   generate(
-    params: ParamValues,
-    format: string,
-    music: Blob | null,
+    request: GenerateRequest,
     onProgress: (progress: ProgressInfo) => void,
   ): Promise<GeneratedTrack>;
-  /** 만든 음원을 사용자의 기기에 저장한다. */
-  save(track: GeneratedTrack): Promise<void>;
+  /** 만든 음원을 사용자의 기기에 저장한다. 사용자가 취소하면 `false`. */
+  save(track: GeneratedTrack): Promise<boolean>;
 }

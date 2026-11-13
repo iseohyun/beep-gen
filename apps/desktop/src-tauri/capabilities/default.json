@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "기본 창이 쓸 수 있는 기능: 앱 명령 호출과 저장 위치 선택 대화상자",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-save"]
+}

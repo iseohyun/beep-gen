@@ -78,7 +78,8 @@ def main():
 
             out = os.path.join(tmp, "out.wav")
             subprocess.run(
-                [exe, "-n", str(n), "-m", str(m), "-v", str(weak), "-l", str(length), "-o", out, "-q"],
+                # -t "" : 안내 음성(TTS)은 비교 대상이 아니므로 뺀다.
+                [exe, "-n", str(n), "-m", str(m), "-v", str(weak), "-l", str(length), "-t", "", "-o", out, "-q"],
                 check=True,
                 stdout=subprocess.DEVNULL,
             )

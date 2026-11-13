@@ -59,7 +59,7 @@ python main.py -n 2 -m 4 -v 25 -l 60 -o my_beat.mp3
 
 ## 🦀 Rust 버전 (개발 중)
 
-웹·PC·CLI가 하나의 코어를 함께 쓰도록 Rust로 옮기는 중입니다. 비프 합성, 배경 음악 템포 맞추기, WAV/MP3 저장이 구현되어 있으며, TTS 인트로와 데스크톱 GUI는 아직 Python 버전에만 있습니다. FFmpeg 없이 동작합니다.
+웹·PC·CLI가 하나의 코어를 함께 쓰도록 Rust로 옮기는 중입니다. 비프 합성, 배경 음악 템포 맞추기, 시작 안내 음성(TTS), WAV/MP3 저장이 구현되어 있고 웹 앱·데스크톱 앱·CLI로 쓸 수 있습니다. FFmpeg 없이 동작합니다.
 
 ```bash
 # 빌드
@@ -70,6 +70,13 @@ target/release/beep-gen -n 1.4 -m 2 -l 60 -o my_beat.mp3
 
 # 배경 음악 넣기: 음악을 비프 템포에 맞춰 변환해 함께 넣는다 (길이는 음악을 따름)
 target/release/beep-gen -n 1.4 -m 2 --music song.mp3 --music-volume 70 -o with_music.mp3
+
+# 음악을 주소로 가져오기 (오디오 파일의 직접 주소만)
+target/release/beep-gen -n 1.4 -m 2 --music https://example.com/song.mp3
+
+# 시작 안내 음성: 기본 문구는 "{n}초, {n}초 비프". 바꾸거나(-t), 빼려면 -t ""
+target/release/beep-gen -n 1.4 -m 2 -t "{n}초 템포" --tts-voice Heami
+target/release/beep-gen --list-voices
 ```
 
 배경 음악은 MP3, WAV, FLAC, OGG, M4A를 받습니다. 음악의 한 박을 비프 간격의 0.5·1·2배 중 가장 가까운 쪽에 맞추며, 박자가 일정한 곡에서 잘 동작합니다. `--beep-volume 0` 으로 템포만 맞춘 음악을 얻을 수 있습니다.
@@ -80,6 +87,8 @@ target/release/beep-gen -n 1.4 -m 2 --music song.mp3 --music-volume 70 -o with_m
 | `crates/beep-cli` | 명령줄 도구 `beep-gen` |
 | `crates/beep-wasm` | 코어의 웹(WASM) 연결부 |
 | `apps/web` | 웹 앱 (TypeScript + Vite, PWA) |
+| `apps/desktop` | 데스크톱 앱 (Tauri, 화면은 `apps/web` 을 그대로 사용) |
+| `crates/beep-native` | 로컬 어댑터: Windows 내장 TTS, URL 다운로드 |
 | `xtask` | 빌드 작업 (WASM 바인딩 생성) |
 | `tools/parity_check.py` | Python 구현과 결과를 비교하는 검사 |
 | `tools/check_align.py` | 배경 음악과 비프의 정렬을 측정하는 도구 |
@@ -95,4 +104,19 @@ npm run build      # 결과물: 저장소 루트의 dist/
 npm run preview    # http://localhost:4173 에서 확인
 ```
 
-기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume` 이 추가되었습니다. `--tts` 는 아직 없습니다. `-n` 은 소수(예: 1.4)를 받습니다.
+기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-t`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume`, `--tts-voice`, `--list-voices` 가 추가되었습니다.
+
+- **안내 음성(TTS)** 은 Windows 내장 음성으로 만듭니다(인터넷 불필요). 다른 운영체제에서는 안내 음성 없이 만들어집니다.
+- **음악 주소** 는 오디오 파일을 바로 내려받을 수 있는 주소만 받습니다. YouTube 등 스트리밍 서비스 주소는 저작권 문제로 지원하지 않습니다. 필요하다면 이 프로젝트를 포크(fork)해 직접 기능을 추가해 사용하시기 바랍니다. `-n` 은 소수(예: 1.4)를 받습니다.
+
+### 데스크톱 앱 (Windows)
+
+웹 앱과 같은 화면에 안내 음성(TTS)과 음악 주소 입력이 더해지고, 음원을 네이티브 속도로 만듭니다.
+
+```bash
+cd apps/web && npm install && cd ../desktop && npm install
+npm run build:exe   # 결과물: target/release/beep-desktop.exe
+npm run build       # 설치 파일까지 만들기
+```
+
+실행에는 WebView2 런타임이 필요합니다(Windows 11에는 기본 포함).

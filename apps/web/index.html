@@ -28,6 +28,16 @@
             />
             <button id="music-clear" type="button" hidden>음악 빼기</button>
           </div>
+          <div id="music-url-row" class="field-control" hidden>
+            <input
+              id="music-url"
+              type="url"
+              inputmode="url"
+              placeholder="또는 오디오 파일 주소 (https://.../song.mp3)"
+              aria-label="오디오 파일 주소"
+              aria-describedby="music-hint"
+            />
+          </div>
           <p id="music-hint" class="hint">
             음악을 넣으면 비프 템포에 맞춰 속도를 바꿔 함께 넣습니다. 음원 길이는 음악 길이를 따릅니다.
             파일은 이 기기 밖으로 나가지 않습니다.
@@ -47,6 +57,19 @@
           <summary>고급 설정</summary>
           <div id="advanced-fields" class="fields"></div>
         </details>
+
+        <div id="intro-section" class="field" hidden>
+          <label for="intro-template">시작 안내 음성 (선택)</label>
+          <div class="field-control">
+            <input id="intro-template" type="text" maxlength="200" aria-describedby="intro-hint" />
+          </div>
+          <div class="field-control">
+            <select id="intro-voice" aria-label="안내 음성의 목소리">
+              <option value="">목소리 자동 선택</option>
+            </select>
+          </div>
+          <p id="intro-hint" class="hint"></p>
+        </div>
 
         <p id="tts-note" class="note" hidden></p>
 

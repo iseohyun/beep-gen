@@ -6,11 +6,12 @@
 import type {
   AppInfo,
   Capabilities,
+  GenerateRequest,
   GeneratedTrack,
   MusicReport,
-  ParamValues,
   Platform,
   ProgressInfo,
+  Voice,
 } from "./platform";
 import type { WorkerRequest, WorkerResponse } from "./worker-protocol";
 
@@ -26,10 +27,11 @@ type RequestBody = WorkerRequest extends infer R ? (R extends unknown ? Omit<R, 
 export class WebPlatform implements Platform {
   readonly capabilities: Capabilities = {
     musicFile: true,
+    // 다른 사이트의 파일은 브라우저 보안 정책(CORS) 때문에 대부분 가져올 수 없다.
+    musicUrl: false,
     // 브라우저는 내장 음성을 파일로 받을 수 없다. 내려받는 TTS 모델은 이후 단계에서 붙인다.
     ttsIntro: false,
-    // 다른 사이트의 파일은 브라우저 보안 정책(CORS) 때문에 대부분 가져올 수 없다.
-    urlInput: false,
+    offlineCache: true,
   };
 
   private readonly worker: Worker;
@@ -80,22 +82,33 @@ export class WebPlatform implements Platform {
     return this.info;
   }
 
+  async listVoices(): Promise<Voice[]> {
+    return [];
+  }
+
   async generate(
-    params: ParamValues,
-    format: string,
-    music: Blob | null,
+    request: GenerateRequest,
     onProgress: (progress: ProgressInfo) => void,
   ): Promise<GeneratedTrack> {
+    if (request.music?.kind === "url") {
+      throw new Error("이 환경에서는 주소로 음악을 가져올 수 없습니다.");
+    }
     const info = await this.describe();
     // 파일 내용은 만들 때마다 새로 읽어 워커로 넘긴다(복사 없이 소유권 이전).
-    const musicBuffer = music ? await music.arrayBuffer() : null;
+    const musicBuffer = request.music ? await request.music.file.arrayBuffer() : null;
     const response = await this.request(
-      { type: "generate", paramsJson: JSON.stringify(params), format, music: musicBuffer },
+      {
+        type: "generate",
+        paramsJson: JSON.stringify(request.params),
+        format: request.format,
+        music: musicBuffer,
+      },
       musicBuffer ? [musicBuffer] : [],
       onProgress,
     );
     if (response.type !== "generated") throw new Error("예상하지 못한 응답입니다.");
-    const mime = info.formats.find((f) => f.id === format)?.mime ?? "application/octet-stream";
+    const mime =
+      info.formats.find((f) => f.id === request.format)?.mime ?? "application/octet-stream";
     return {
       bytes: response.bytes,
       fileName: response.fileName,
@@ -103,10 +116,11 @@ export class WebPlatform implements Platform {
       musicReport: response.musicReportJson
         ? (JSON.parse(response.musicReportJson) as MusicReport)
         : undefined,
+      notices: [],
     };
   }
 
-  async save(track: GeneratedTrack): Promise<void> {
+  async save(track: GeneratedTrack): Promise<boolean> {
     const url = URL.createObjectURL(new Blob([track.bytes], { type: track.mime }));
     const link = document.createElement("a");
     link.href = url;
@@ -116,5 +130,6 @@ export class WebPlatform implements Platform {
     link.remove();
     // 다운로드가 시작될 시간을 준 뒤 임시 주소를 해제한다.
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return true;
   }
 }
