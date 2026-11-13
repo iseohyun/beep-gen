@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="원하는 주기와 박자 분할로 비프음 오디오 파일을 만드는 도구" />
+    <meta name="theme-color" content="#2563eb" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <title>Beep Gen · 맞춤형 비프음 생성기</title>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>Beep Gen</h1>
+        <p class="tagline">원하는 주기와 박자로 비프음 파일을 만듭니다. 모든 처리는 이 기기 안에서 이루어집니다.</p>
+      </header>
+
+      <form id="settings" class="card">
+        <div id="music-section" class="field" hidden>
+          <label for="music">배경 음악 (선택)</label>
+          <div class="field-control">
+            <input
+              id="music"
+              type="file"
+              accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a"
+              aria-describedby="music-hint"
+            />
+            <button id="music-clear" type="button" hidden>음악 빼기</button>
+          </div>
+          <div id="music-url-row" class="field-control" hidden>
+            <input
+              id="music-url"
+              type="url"
+              inputmode="url"
+              placeholder="또는 오디오 파일 주소 (https://.../song.mp3)"
+              aria-label="오디오 파일 주소"
+              aria-describedby="music-hint"
+            />
+          </div>
+          <p id="music-hint" class="hint">
+            음악을 넣으면 비프 템포에 맞춰 속도를 바꿔 함께 넣습니다. 음원 길이는 음악 길이를 따릅니다.
+            파일은 이 기기 밖으로 나가지 않습니다.
+          </p>
+        </div>
+
+        <div id="basic-fields" class="fields"></div>
+
+        <div class="field">
+          <label for="format">파일 형식</label>
+          <div class="field-control">
+            <select id="format"></select>
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>고급 설정</summary>
+          <div id="advanced-fields" class="fields"></div>
+        </details>
+
+        <div id="intro-section" class="field" hidden>
+          <label for="intro-template">시작 안내 음성 (선택)</label>
+          <div id="intro-setup" class="setup" hidden>
+            <p id="intro-setup-text"></p>
+            <ul id="intro-setup-terms"></ul>
+            <p id="intro-setup-license" class="hint"></p>
+            <div class="actions">
+              <button id="intro-install" type="button"></button>
+            </div>
+            <progress id="intro-install-progress" max="100" value="0" hidden></progress>
+            <p id="intro-install-status" class="status" role="status" aria-live="polite"></p>
+          </div>
+          <div id="intro-controls" hidden>
+            <div class="field-control">
+              <input id="intro-template" type="text" maxlength="200" aria-describedby="intro-hint" />
+            </div>
+            <div class="field-control">
+              <select id="intro-voice" aria-label="안내 음성의 목소리">
+                <option value="">목소리 자동 선택</option>
+              </select>
+            </div>
+            <p id="intro-hint" class="hint"></p>
+            <button id="intro-remove" type="button" class="link" hidden>내려받은 음성 모델 지우기</button>
+          </div>
+        </div>
+
+        <p id="tts-note" class="note" hidden></p>
+
+        <div class="actions">
+          <button id="generate" type="submit" class="primary" disabled>음원 만들기</button>
+          <button id="reset" type="button">기본값으로</button>
+        </div>
+
+        <progress id="progress" max="100" value="0" hidden></progress>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </form>
+
+      <section id="result" class="card result" hidden>
+        <h2>결과</h2>
+        <p id="result-name" class="result-name"></p>
+        <audio id="player" controls preload="metadata"></audio>
+        <div id="music-report" hidden></div>
+        <div class="actions">
+          <button id="download" type="button" class="primary">파일 저장</button>
+        </div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="version"></span>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

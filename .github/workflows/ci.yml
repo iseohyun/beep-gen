@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust 도구 준비
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
+          rustup default stable
+
+      - name: 서식 검사
+        run: cargo fmt --all --check
+
+      # 데스크톱 앱(beep-desktop)은 Windows 전용 작업에서 따로 검사한다.
+      # 리눅스에서 빌드하려면 시스템 웹뷰 라이브러리가 필요하기 때문이다.
+      - name: 린트
+        run: cargo clippy --workspace --exclude beep-desktop --all-targets --all-features -- -D warnings
+
+      - name: 테스트
+        run: cargo test --workspace --exclude beep-desktop --all-features
+
+      # 코어에 플랫폼 전용 코드(파일·네트워크·OS 호출, C 의존성)가 섞이면 여기서 실패한다.
+      - name: 코어 WASM 빌드
+        run: cargo build -p beep-core --target wasm32-unknown-unknown --release
+
+      - name: CLI 릴리즈 빌드
+        run: cargo build -p beep-cli --release
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 기존 Python 구현과 비프 합성 결과가 같은지 확인한다.
+      - name: Python 구현과 결과 비교
+        run: python tools/parity_check.py target/release/beep-gen
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust 도구 준비
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # WASM 생성 → 타입 검사 → 번들. 버전 파일과 Cargo 버전이 다르면 여기서 실패한다.
+      - name: 웹 앱 빌드
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build
+
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust 도구 준비
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --target wasm32-unknown-unknown
+          rustup default stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+
+      # 데스크톱 앱은 웹 빌드 결과물(dist/)을 그대로 담으므로 먼저 만든다.
+      - name: 웹 앱 빌드
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 데스크톱 앱 린트
+        run: cargo clippy -p beep-desktop -p beep-native --all-targets -- -D warnings
+
+      - name: 로컬 어댑터 테스트
+        run: cargo test -p beep-native
+
+      # 설치 파일 없이 실행 파일만 만들어 빌드가 되는지 확인한다.
+      - name: 데스크톱 앱 빌드
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run build:exe

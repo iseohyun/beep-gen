@@ -1,0 +1,347 @@
+/*
+ * beep-gen 의 유일한 스타일 파일 (단일 중앙 집중형 CSS).
+ * 컴포넌트별 CSS, CSS Modules, Tailwind 는 쓰지 않는다.
+ * 규칙: .agents/rules/project_architecture.md 3절
+ */
+
+/* ── 색과 치수 ─────────────────────────────────────────── */
+:root {
+  color-scheme: light dark;
+
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --border: #d5dbe7;
+  --text: #16202f;
+  --text-muted: #5b6678;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-text: #ffffff;
+  --note-bg: #eef3ff;
+  --error: #b42318;
+  --warning-bg: #fff4d6;
+  --warning-text: #6b4a00;
+  --focus: #f59e0b;
+
+  --radius: 12px;
+  --radius-small: 8px;
+  --gap: 16px;
+  --control-height: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1623;
+    --surface: #18212f;
+    --border: #2c3a50;
+    --text: #e8edf6;
+    --text-muted: #9aa7bb;
+    --accent: #5b8def;
+    --accent-hover: #7aa2f5;
+    --accent-text: #0b1220;
+    --note-bg: #1c2942;
+    --error: #ff8a7a;
+    --warning-bg: #3a2e0f;
+    --warning-text: #ffd98a;
+  }
+}
+
+/* ── 기본 ──────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Malgun Gothic",
+    "Apple SD Gothic Neo",
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-text-size-adjust: 100%;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ── 배치 ──────────────────────────────────────────────── */
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 28px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.app-header h1 {
+  margin: 0 0 4px;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.app-footer {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ── 입력 칸 ───────────────────────────────────────────── */
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--gap);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.field-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 한 항목 안에 입력 줄이 여럿일 때(파일 + 주소, 문구 + 목소리)의 간격 */
+.field-control + .field-control {
+  margin-top: 2px;
+}
+
+.field input,
+.field select {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-height);
+  padding: 0 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.field input:user-invalid {
+  border-color: var(--error);
+}
+
+.unit {
+  color: var(--text-muted);
+  min-width: 2.5em;
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.advanced summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.advanced[open] summary {
+  margin-bottom: 12px;
+}
+
+.note {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--note-bg);
+  border-radius: var(--radius-small);
+  font-size: 14px;
+}
+
+.note a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── 버튼 ──────────────────────────────────────────────── */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+button {
+  height: var(--control-height);
+  padding: 0 18px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button.primary {
+  flex: 1;
+  min-width: 160px;
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── 진행 상태와 결과 ──────────────────────────────────── */
+progress {
+  width: 100%;
+  height: 10px;
+  accent-color: var(--accent);
+}
+
+.status {
+  margin: 0;
+  min-height: 1.55em;
+  color: var(--text-muted);
+}
+
+.status.error {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.result-name {
+  margin: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.result audio {
+  width: 100%;
+}
+
+/* 파일 선택 칸은 브라우저 기본 버튼이 들어가므로 높이를 내용에 맞춘다. */
+.field input[type="file"] {
+  height: auto;
+  min-height: var(--control-height);
+  padding: 8px 12px;
+}
+
+/* ── 배경 음악 보고 ────────────────────────────────────── */
+.report {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.report dt {
+  color: var(--text-muted);
+}
+
+.report dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.warning {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border-radius: var(--radius-small);
+  font-size: 14px;
+}
+
+/* ── 안내 음성 모델 내려받기 안내 ───────────────────────── */
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--note-bg);
+  border-radius: var(--radius-small);
+  font-size: 14px;
+}
+
+.setup p,
+.setup ul {
+  margin: 0;
+}
+
+.setup ul {
+  padding-left: 20px;
+}
+
+.setup a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#intro-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 글자처럼 보이는 보조 버튼 */
+button.link {
+  align-self: flex-start;
+  height: auto;
+  padding: 4px 0;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: underline;
+}

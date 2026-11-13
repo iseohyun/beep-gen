@@ -28,3 +28,10 @@ dist/
 Thumbs.db
 [Dd]esktop.ini
 .DS_Store
+
+# Rust 빌드 아티팩트
+target/
+
+# 웹 UI: 패키지 캐시와 생성되는 WASM 바인딩
+node_modules/
+apps/web/src/wasm/

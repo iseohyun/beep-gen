@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+description = "저장소 빌드 작업 (cargo run -p xtask -- <작업>)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# crates/beep-wasm 의 wasm-bindgen 과 반드시 같은 버전이어야 한다.
+wasm-bindgen-cli-support = "=0.2.130"

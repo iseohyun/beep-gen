@@ -1,0 +1,23 @@
+[package]
+name = "beep-desktop"
+description = "Beep Gen 데스크톱 앱 (Tauri). 화면은 apps/web 을 그대로 쓴다."
+version.workspace = true
+edition.workspace = true
+rust-version = "1.90"
+repository.workspace = true
+publish = false
+
+[lib]
+name = "beep_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+beep-core = { path = "../../../crates/beep-core" }
+beep-native = { path = "../../../crates/beep-native" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-dialog = "2.8.4"

@@ -1,0 +1,22 @@
+[package]
+name = "beep-core"
+description = "비프음 합성과 인코딩 코어 (웹 WASM · 네이티브 공용, 플랫폼 코드 없음)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+# CLI 옵션을 파라미터 구조체에서 파생한다. 웹 빌드에는 포함하지 않는다.
+cli = ["dep:clap"]
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"], optional = true }
+libm = "0.2.16"
+rusty_mp3 = "1"
+serde = { version = "1.0.229", features = ["derive"] }
+symphonia = { version = "0.6", default-features = false, features = ["mp3", "wav", "pcm", "flac", "ogg", "vorbis", "aac", "isomp4", "id3v1", "id3v2"] }
+timestretch = { version = "0.16", default-features = false, features = ["analysis"] }
+
+[dev-dependencies]
+serde_json = "1.0.154"
