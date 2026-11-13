@@ -18,6 +18,8 @@
   --accent-text: #ffffff;
   --note-bg: #eef3ff;
   --error: #b42318;
+  --warning-bg: #fff4d6;
+  --warning-text: #6b4a00;
   --focus: #f59e0b;
 
   --radius: 12px;
@@ -38,6 +40,8 @@
     --accent-text: #0b1220;
     --note-bg: #1c2942;
     --error: #ff8a7a;
+    --warning-bg: #3a2e0f;
+    --warning-text: #ffd98a;
   }
 }
 
@@ -258,4 +262,38 @@ progress {
 
 .result audio {
   width: 100%;
+}
+
+/* 파일 선택 칸은 브라우저 기본 버튼이 들어가므로 높이를 내용에 맞춘다. */
+.field input[type="file"] {
+  height: auto;
+  min-height: var(--control-height);
+  padding: 8px 12px;
+}
+
+/* ── 배경 음악 보고 ────────────────────────────────────── */
+.report {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.report dt {
+  color: var(--text-muted);
+}
+
+.report dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.warning {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border-radius: var(--radius-small);
+  font-size: 14px;
 }

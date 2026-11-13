@@ -37,34 +37,69 @@ pub fn describe() -> String {
     .to_string()
 }
 
-/// 비프 음원을 만들어 파일 바이트로 돌려준다.
+/// 만들어진 음원.
+#[wasm_bindgen]
+pub struct TrackResult {
+    bytes: Vec<u8>,
+    file_name: String,
+    music_report_json: Option<String>,
+}
+
+#[wasm_bindgen]
+impl TrackResult {
+    /// 완성된 파일 바이트를 꺼낸다. 큰 데이터를 두 번 복사하지 않도록 한 번만 꺼낼 수 있다.
+    #[wasm_bindgen(js_name = takeBytes)]
+    pub fn take_bytes(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.bytes)
+    }
+
+    /// 설정값에 맞는 기본 파일 이름.
+    #[wasm_bindgen(getter, js_name = fileName)]
+    pub fn file_name(&self) -> String {
+        self.file_name.clone()
+    }
+
+    /// 배경 음악을 넣었을 때의 보고(JSON). 음악이 없으면 `undefined`.
+    #[wasm_bindgen(getter, js_name = musicReportJson)]
+    pub fn music_report_json(&self) -> Option<String> {
+        self.music_report_json.clone()
+    }
+}
+
+/// 음원을 만든다.
 ///
-/// `on_progress` 는 백분율(0~100)이 바뀔 때마다 그 값을 인자로 호출된다.
+/// `music` 에 음악 파일 바이트를 주면 비프 템포에 맞춰 함께 넣는다.
+/// `on_progress(percent, stageKey, stageLabel)` 는 진행 상황이 바뀔 때마다 호출된다.
 #[wasm_bindgen]
 pub fn build_track(
     params_json: &str,
     format: &str,
+    music: Option<Vec<u8>>,
     on_progress: &js_sys::Function,
-) -> Result<Vec<u8>, JsError> {
+) -> Result<TrackResult, JsError> {
     let params = parse_params(params_json)?;
     let format = parse_format(format)?;
-    let mut last_percent = None;
-    beep_core::build_track(&params, format, |progress| {
-        let percent = progress.percent();
-        if last_percent != Some(percent) {
-            last_percent = Some(percent);
+    let mut last = None;
+    let output = beep_core::build_track(&params, format, music.as_deref(), |progress| {
+        if last != Some(progress) {
+            last = Some(progress);
             // 진행 표시 실패는 음원 생성과 무관하므로 무시한다.
-            let _ = on_progress.call1(&JsValue::NULL, &JsValue::from(percent));
+            let _ = on_progress.call3(
+                &JsValue::NULL,
+                &JsValue::from(progress.percent),
+                &JsValue::from(progress.stage.key()),
+                &JsValue::from(progress.stage.label()),
+            );
         }
     })
-    .map_err(|e| JsError::new(&e.to_string()))
-}
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
-/// 설정값에 맞는 기본 파일 이름.
-#[wasm_bindgen]
-pub fn default_file_name(params_json: &str, format: &str) -> Result<String, JsError> {
-    Ok(beep_core::default_file_name(
-        &parse_params(params_json)?,
-        parse_format(format)?,
-    ))
+    Ok(TrackResult {
+        bytes: output.bytes,
+        file_name: beep_core::default_file_name(&params, format, music.is_some()),
+        music_report_json: output
+            .music
+            .as_ref()
+            .map(|report| serde_json::to_string(report).unwrap_or_default()),
+    })
 }

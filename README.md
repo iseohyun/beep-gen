@@ -59,7 +59,7 @@ python main.py -n 2 -m 4 -v 25 -l 60 -o my_beat.mp3
 
 ## 🦀 Rust 버전 (개발 중)
 
-웹·PC·CLI가 하나의 코어를 함께 쓰도록 Rust로 옮기는 중입니다. 현재는 비프 합성과 WAV/MP3 저장까지 구현되어 있으며, TTS 인트로와 GUI는 아직 Python 버전에만 있습니다. FFmpeg 없이 MP3를 만듭니다.
+웹·PC·CLI가 하나의 코어를 함께 쓰도록 Rust로 옮기는 중입니다. 비프 합성, 배경 음악 템포 맞추기, WAV/MP3 저장이 구현되어 있으며, TTS 인트로와 데스크톱 GUI는 아직 Python 버전에만 있습니다. FFmpeg 없이 동작합니다.
 
 ```bash
 # 빌드
@@ -67,7 +67,12 @@ cargo build --release -p beep-cli
 
 # 실행 (예: 1.4초 주기, 2분할, 60초)
 target/release/beep-gen -n 1.4 -m 2 -l 60 -o my_beat.mp3
+
+# 배경 음악 넣기: 음악을 비프 템포에 맞춰 변환해 함께 넣는다 (길이는 음악을 따름)
+target/release/beep-gen -n 1.4 -m 2 --music song.mp3 --music-volume 70 -o with_music.mp3
 ```
+
+배경 음악은 MP3, WAV, FLAC, OGG, M4A를 받습니다. 음악의 한 박을 비프 간격의 0.5·1·2배 중 가장 가까운 쪽에 맞추며, 박자가 일정한 곡에서 잘 동작합니다. `--beep-volume 0` 으로 템포만 맞춘 음악을 얻을 수 있습니다.
 
 | 폴더 | 내용 |
 | :--- | :--- |
@@ -77,7 +82,7 @@ target/release/beep-gen -n 1.4 -m 2 -l 60 -o my_beat.mp3
 | `apps/web` | 웹 앱 (TypeScript + Vite, PWA) |
 | `xtask` | 빌드 작업 (WASM 바인딩 생성) |
 | `tools/parity_check.py` | Python 구현과 결과를 비교하는 검사 |
-| `spike/` | 템포 변환 사전 검증 코드 (제품 코드 아님) |
+| `tools/check_align.py` | 배경 음악과 비프의 정렬을 측정하는 도구 |
 
 ### 웹 앱
 
@@ -90,4 +95,4 @@ npm run build      # 결과물: 저장소 루트의 dist/
 npm run preview    # http://localhost:4173 에서 확인
 ```
 
-옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-o`, `--format`), `--tts` 는 아직 없습니다. `-n` 은 소수(예: 1.4)를 받습니다.
+기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume` 이 추가되었습니다. `--tts` 는 아직 없습니다. `-n` 은 소수(예: 1.4)를 받습니다.

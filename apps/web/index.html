@@ -17,6 +17,23 @@
       </header>
 
       <form id="settings" class="card">
+        <div id="music-section" class="field" hidden>
+          <label for="music">배경 음악 (선택)</label>
+          <div class="field-control">
+            <input
+              id="music"
+              type="file"
+              accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a"
+              aria-describedby="music-hint"
+            />
+            <button id="music-clear" type="button" hidden>음악 빼기</button>
+          </div>
+          <p id="music-hint" class="hint">
+            음악을 넣으면 비프 템포에 맞춰 속도를 바꿔 함께 넣습니다. 음원 길이는 음악 길이를 따릅니다.
+            파일은 이 기기 밖으로 나가지 않습니다.
+          </p>
+        </div>
+
         <div id="basic-fields" class="fields"></div>
 
         <div class="field">
@@ -46,6 +63,7 @@
         <h2>결과</h2>
         <p id="result-name" class="result-name"></p>
         <audio id="player" controls preload="metadata"></audio>
+        <div id="music-report" hidden></div>
         <div class="actions">
           <button id="download" type="button" class="primary">파일 저장</button>
         </div>

@@ -16,6 +16,8 @@ export interface ParamSpec {
   step: number;
   choices: number[];
   advanced: boolean;
+  /** 이 항목이 쓰이는 경우. 쓰이지 않을 때는 화면에서 숨긴다. */
+  when: "always" | "with-music" | "without-music";
 }
 
 export interface FormatInfo {
@@ -35,14 +37,38 @@ export interface AppInfo {
 /** 파라미터 값. 키는 `ParamSpec.key`. */
 export type ParamValues = Record<string, number>;
 
+/** 배경 음악을 어떻게 맞췄는지에 대한 보고. 코어(Rust)의 `MusicReport` 와 같은 모양이다. */
+export interface MusicReport {
+  detected_bpm: number;
+  beat_confidence: number;
+  target_beat_sec: number;
+  tempo_rate: number;
+  tempo_change_pct: number;
+  correction: number;
+  source_seconds: number;
+  output_seconds: number;
+  anchored_on_downbeat: boolean;
+  warnings: string[];
+}
+
 export interface GeneratedTrack {
   bytes: Uint8Array<ArrayBuffer>;
   fileName: string;
   mime: string;
+  /** 배경 음악을 넣었을 때만 있다. */
+  musicReport?: MusicReport;
+}
+
+/** 진행 상황. `stage` 는 사람이 읽는 단계 설명이다. */
+export interface ProgressInfo {
+  percent: number;
+  stage: string;
 }
 
 /** 이 환경에서 쓸 수 있는 기능. */
 export interface Capabilities {
+  /** 배경 음악 파일을 고를 수 있는지. */
+  musicFile: boolean;
   /** TTS 인트로 음성을 음원에 넣을 수 있는지. */
   ttsIntro: boolean;
   /** URL 로 음악을 가져올 수 있는지. */
@@ -53,11 +79,14 @@ export interface Platform {
   readonly capabilities: Capabilities;
   /** 화면 구성 정보를 가져온다. */
   describe(): Promise<AppInfo>;
-  /** 음원을 만든다. `onProgress` 는 0~100 의 백분율을 받는다. */
+  /**
+   * 음원을 만든다. `music` 에 음악 파일을 주면 비프 템포에 맞춰 함께 넣는다.
+   */
   generate(
     params: ParamValues,
     format: string,
-    onProgress: (percent: number) => void,
+    music: Blob | null,
+    onProgress: (progress: ProgressInfo) => void,
   ): Promise<GeneratedTrack>;
   /** 만든 음원을 사용자의 기기에 저장한다. */
   save(track: GeneratedTrack): Promise<void>;

@@ -4,7 +4,14 @@
 // 추가하면 화면에도 자동으로 나타나고, 이름·기본값·범위가 어긋날 수 없다.
 
 import "./styles/app.css";
-import type { AppInfo, GeneratedTrack, ParamSpec, ParamValues, Platform } from "./platform";
+import type {
+  AppInfo,
+  GeneratedTrack,
+  MusicReport,
+  ParamSpec,
+  ParamValues,
+  Platform,
+} from "./platform";
 import { WebPlatform } from "./platform-web";
 import { APP_VERSION, BUILD_TAG } from "./version";
 
@@ -51,6 +58,11 @@ function formatBytes(bytes: number): string {
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
+function formatDuration(seconds: number): string {
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}분 ${String(whole % 60).padStart(2, "0")}초`;
+}
+
 /** 파라미터 하나의 입력 칸을 만든다. */
 function createField(spec: ParamSpec, initial: number): HTMLElement {
   const inputId = `param-${spec.key}`;
@@ -79,13 +91,29 @@ function createField(spec: ParamSpec, initial: number): HTMLElement {
   control.dataset.key = spec.key;
   control.setAttribute("aria-describedby", hintId);
 
-  return el(
+  const field = el(
     "div",
     { className: "field" },
     el("label", { htmlFor: inputId }, spec.label),
     el("div", { className: "field-control" }, control, el("span", { className: "unit" }, spec.unit)),
     el("p", { id: hintId, className: "hint" }, spec.description),
   );
+  field.dataset.when = spec.when;
+  return field;
+}
+
+/**
+ * 배경 음악 유무에 따라 쓰이지 않는 항목을 숨긴다.
+ * 숨긴 칸은 비활성화해서, 보이지 않는 칸의 값 때문에 제출이 막히는 일이 없게 한다.
+ */
+function applyMusicState(form: HTMLFormElement, hasMusic: boolean): void {
+  for (const field of form.querySelectorAll<HTMLElement>("[data-when]")) {
+    const when = field.dataset.when;
+    const used = when === "always" || (when === "with-music") === hasMusic;
+    field.hidden = !used;
+    const control = field.querySelector<HTMLInputElement | HTMLSelectElement>("[data-key]");
+    if (control) control.disabled = !used;
+  }
 }
 
 /** 폼에서 현재 값을 읽는다. 범위를 벗어난 칸이 있으면 그 칸을 알려주고 null 을 돌려준다. */
@@ -97,9 +125,37 @@ function readParams(form: HTMLFormElement, info: AppInfo): ParamValues | null {
       `[data-key="${spec.key}"]`,
     );
     if (!control) continue;
-    values[spec.key] = Number(control.value);
+    // 숨겨져 쓰이지 않는 항목도 값은 그대로 보낸다(코어가 범위를 검사한다).
+    const value = Number(control.value);
+    values[spec.key] = Number.isFinite(value) && control.value !== "" ? value : spec.default;
   }
   return values;
+}
+
+/** 배경 음악을 어떻게 맞췄는지 보여준다. */
+function renderMusicReport(container: HTMLElement, report: MusicReport | undefined): void {
+  container.replaceChildren();
+  container.hidden = !report;
+  if (!report) return;
+
+  const change = report.tempo_change_pct;
+  const rows: [string, string][] = [
+    [
+      "검출한 템포",
+      `${report.detected_bpm.toFixed(1)} BPM (신뢰도 ${Math.round(report.beat_confidence * 100)}%)`,
+    ],
+    ["템포 변화", `${change >= 0 ? "+" : ""}${change.toFixed(1)}%`],
+    ["한 박의 길이", `${report.target_beat_sec.toFixed(3)}초`],
+    ["길이", `${formatDuration(report.source_seconds)} → ${formatDuration(report.output_seconds)}`],
+  ];
+  const list = el("dl", { className: "report" });
+  for (const [term, value] of rows) {
+    list.append(el("dt", {}, term), el("dd", {}, value));
+  }
+  container.append(list);
+  for (const warning of report.warnings) {
+    container.append(el("p", { className: "warning" }, warning));
+  }
 }
 
 async function start(platform: Platform): Promise<void> {
@@ -107,6 +163,9 @@ async function start(platform: Platform): Promise<void> {
   const basicFields = byId("basic-fields");
   const advancedFields = byId("advanced-fields");
   const formatSelect = byId<HTMLSelectElement>("format");
+  const musicSection = byId("music-section");
+  const musicInput = byId<HTMLInputElement>("music");
+  const musicClear = byId<HTMLButtonElement>("music-clear");
   const generateButton = byId<HTMLButtonElement>("generate");
   const resetButton = byId<HTMLButtonElement>("reset");
   const progress = byId<HTMLProgressElement>("progress");
@@ -114,6 +173,7 @@ async function start(platform: Platform): Promise<void> {
   const result = byId("result");
   const player = byId<HTMLAudioElement>("player");
   const resultName = byId("result-name");
+  const musicReport = byId("music-report");
   const downloadButton = byId<HTMLButtonElement>("download");
   const ttsNote = byId("tts-note");
 
@@ -128,6 +188,13 @@ async function start(platform: Platform): Promise<void> {
     return;
   }
 
+  const selectedMusic = (): File | null => musicInput.files?.[0] ?? null;
+  const refreshMusicState = (): void => {
+    const hasMusic = selectedMusic() !== null;
+    musicClear.hidden = !hasMusic;
+    applyMusicState(form, hasMusic);
+  };
+
   const saved = loadSettings();
   const render = (values: ParamValues, format: string): void => {
     basicFields.replaceChildren();
@@ -140,10 +207,12 @@ async function start(platform: Platform): Promise<void> {
       ...info.formats.map((f) => el("option", { value: f.id }, f.label)),
     );
     formatSelect.value = info.formats.some((f) => f.id === format) ? format : info.formats[0].id;
+    refreshMusicState();
   };
   render(saved.params ?? {}, saved.format ?? "");
 
-  // 기능이 없는 환경에서는 그 사실과 대안을 알려준다.
+  // 기능이 있는 환경에서만 해당 입력을 보여주고, 없으면 그 사실과 대안을 알려준다.
+  musicSection.hidden = !platform.capabilities.musicFile;
   if (!platform.capabilities.ttsIntro) {
     ttsNote.hidden = false;
     ttsNote.replaceChildren(
@@ -153,12 +222,20 @@ async function start(platform: Platform): Promise<void> {
     );
   }
 
+  musicInput.addEventListener("change", refreshMusicState);
+  musicClear.addEventListener("click", () => {
+    musicInput.value = "";
+    refreshMusicState();
+  });
+
   let track: GeneratedTrack | null = null;
   let playerUrl: string | null = null;
 
   const setBusy = (busy: boolean): void => {
     generateButton.disabled = busy;
     resetButton.disabled = busy;
+    musicInput.disabled = busy;
+    musicClear.disabled = busy;
     progress.hidden = !busy;
     form.setAttribute("aria-busy", String(busy));
   };
@@ -176,13 +253,15 @@ async function start(platform: Platform): Promise<void> {
     status.textContent = "음원을 만드는 중입니다…";
     const startedAt = performance.now();
     try {
-      track = await platform.generate(params, format, (percent) => {
-        progress.value = percent;
+      track = await platform.generate(params, format, selectedMusic(), (update) => {
+        progress.value = update.percent;
+        status.textContent = `${update.stage}… ${update.percent}%`;
       });
       if (playerUrl) URL.revokeObjectURL(playerUrl);
       playerUrl = URL.createObjectURL(new Blob([track.bytes], { type: track.mime }));
       player.src = playerUrl;
       resultName.textContent = `${track.fileName} (${formatBytes(track.bytes.length)})`;
+      renderMusicReport(musicReport, track.musicReport);
       result.hidden = false;
       const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
       status.textContent = `완료했습니다 (${seconds}초).`;

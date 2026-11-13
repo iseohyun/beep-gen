@@ -7,15 +7,17 @@ import type {
   AppInfo,
   Capabilities,
   GeneratedTrack,
+  MusicReport,
   ParamValues,
   Platform,
+  ProgressInfo,
 } from "./platform";
 import type { WorkerRequest, WorkerResponse } from "./worker-protocol";
 
 type Pending = {
   resolve: (response: WorkerResponse) => void;
   reject: (error: Error) => void;
-  onProgress?: (percent: number) => void;
+  onProgress?: (progress: ProgressInfo) => void;
 };
 
 /** `WorkerRequest` 에서 id 를 뺀 형태(유니언의 각 갈래를 유지한다). */
@@ -23,6 +25,7 @@ type RequestBody = WorkerRequest extends infer R ? (R extends unknown ? Omit<R, 
 
 export class WebPlatform implements Platform {
   readonly capabilities: Capabilities = {
+    musicFile: true,
     // 브라우저는 내장 음성을 파일로 받을 수 없다. 내려받는 TTS 모델은 이후 단계에서 붙인다.
     ttsIntro: false,
     // 다른 사이트의 파일은 브라우저 보안 정책(CORS) 때문에 대부분 가져올 수 없다.
@@ -38,7 +41,7 @@ export class WebPlatform implements Platform {
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handle(event.data);
     this.worker.onerror = (event) => {
-      const error = new Error(event.message || "작업 스레드를 시작하지 못했습니다.");
+      const error = new Error(event.message || "작업 스레드에서 오류가 났습니다.");
       for (const entry of this.pending.values()) entry.reject(error);
       this.pending.clear();
     };
@@ -48,7 +51,7 @@ export class WebPlatform implements Platform {
     const entry = this.pending.get(response.id);
     if (!entry) return;
     if (response.type === "progress") {
-      entry.onProgress?.(response.percent);
+      entry.onProgress?.({ percent: response.percent, stage: response.stage });
       return;
     }
     this.pending.delete(response.id);
@@ -58,12 +61,13 @@ export class WebPlatform implements Platform {
 
   private request(
     body: RequestBody,
-    onProgress?: (percent: number) => void,
+    transfer: Transferable[] = [],
+    onProgress?: (progress: ProgressInfo) => void,
   ): Promise<WorkerResponse> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onProgress });
-      this.worker.postMessage({ ...body, id } as WorkerRequest);
+      this.worker.postMessage({ ...body, id } as WorkerRequest, transfer);
     });
   }
 
@@ -79,16 +83,27 @@ export class WebPlatform implements Platform {
   async generate(
     params: ParamValues,
     format: string,
-    onProgress: (percent: number) => void,
+    music: Blob | null,
+    onProgress: (progress: ProgressInfo) => void,
   ): Promise<GeneratedTrack> {
     const info = await this.describe();
+    // 파일 내용은 만들 때마다 새로 읽어 워커로 넘긴다(복사 없이 소유권 이전).
+    const musicBuffer = music ? await music.arrayBuffer() : null;
     const response = await this.request(
-      { type: "generate", paramsJson: JSON.stringify(params), format },
+      { type: "generate", paramsJson: JSON.stringify(params), format, music: musicBuffer },
+      musicBuffer ? [musicBuffer] : [],
       onProgress,
     );
     if (response.type !== "generated") throw new Error("예상하지 못한 응답입니다.");
     const mime = info.formats.find((f) => f.id === format)?.mime ?? "application/octet-stream";
-    return { bytes: response.bytes, fileName: response.fileName, mime };
+    return {
+      bytes: response.bytes,
+      fileName: response.fileName,
+      mime,
+      musicReport: response.musicReportJson
+        ? (JSON.parse(response.musicReportJson) as MusicReport)
+        : undefined,
+    };
   }
 
   async save(track: GeneratedTrack): Promise<void> {

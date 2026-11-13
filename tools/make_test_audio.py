@@ -1,4 +1,7 @@
-"""검증용 합성 음악 생성: 100 BPM, 5분, 스테레오 44.1kHz (킥·스네어·하이햇·베이스·코드)."""
+"""검증용 합성 음악 생성: 5분, 스테레오 44.1kHz (킥·스네어·하이햇·베이스·코드).
+
+사용법: python tools/make_test_audio.py <출력.wav> [BPM=100]   (numpy 필요)
+"""
 import sys, wave
 import numpy as np
 

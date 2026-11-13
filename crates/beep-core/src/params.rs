@@ -12,6 +12,8 @@ pub mod defaults {
     pub const SUBDIVISION: u32 = 2;
     pub const WEAK_VOLUME_PCT: f64 = 35.0;
     pub const LENGTH_SEC: u32 = 300;
+    pub const BEEP_VOLUME_PCT: f64 = 100.0;
+    pub const MUSIC_VOLUME_PCT: f64 = 70.0;
     pub const PRIMARY_FREQ: f64 = 880.0;
     pub const SUB_FREQ: f64 = 587.33;
     pub const SAMPLE_RATE: u32 = 44_100;
@@ -23,6 +25,7 @@ pub mod limits {
     pub const SUBDIVISION: (u32, u32) = (1, 64);
     pub const WEAK_VOLUME_PCT: (f64, f64) = (0.0, 100.0);
     pub const LENGTH_SEC: (u32, u32) = (1, 3600);
+    pub const VOLUME_PCT: (f64, f64) = (0.0, 100.0);
     pub const FREQ: (f64, f64) = (20.0, 20_000.0);
     /// MP3(MPEG-1 Layer III)가 지원하는 샘플 레이트.
     pub const SAMPLE_RATES: [u32; 3] = [32_000, 44_100, 48_000];
@@ -57,13 +60,29 @@ pub struct TrackParams {
     #[serde(rename = "weak-volume")]
     pub weak_volume_pct: f64,
 
-    /// 비프 구간의 길이 l (초).
+    /// 비프 구간의 길이 l (초). 배경 음악이 있으면 음악 길이를 따르고 이 값은 쓰지 않는다.
     #[cfg_attr(
         feature = "cli",
         arg(short = 'l', long = "length", default_value_t = defaults::LENGTH_SEC)
     )]
     #[serde(rename = "length")]
     pub length_sec: u32,
+
+    /// 비프 전체의 음량 (%, 0~100). 0이면 비프 없이 음악만 나온다.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "beep-volume", default_value_t = defaults::BEEP_VOLUME_PCT)
+    )]
+    #[serde(rename = "beep-volume")]
+    pub beep_volume_pct: f64,
+
+    /// 배경 음악의 음량 (%, 0~100). 배경 음악이 있을 때만 쓴다.
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "music-volume", default_value_t = defaults::MUSIC_VOLUME_PCT)
+    )]
+    #[serde(rename = "music-volume")]
+    pub music_volume_pct: f64,
 
     /// 강한 비프의 주파수 (Hz).
     #[cfg_attr(
@@ -121,6 +140,20 @@ pub struct ParamSpec {
     pub choices: Vec<f64>,
     /// 자주 바꾸지 않는 고급 설정인지.
     pub advanced: bool,
+    /// 이 항목이 쓰이는 경우. 쓰이지 않는 경우에는 화면에서 숨긴다.
+    pub when: ParamWhen,
+}
+
+/// 파라미터가 쓰이는 경우.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ParamWhen {
+    /// 항상.
+    Always,
+    /// 배경 음악이 있을 때만.
+    WithMusic,
+    /// 배경 음악이 없을 때만.
+    WithoutMusic,
 }
 
 impl ParamSpec {
@@ -137,7 +170,13 @@ impl ParamSpec {
             step: 1.0,
             choices: Vec::new(),
             advanced: false,
+            when: ParamWhen::Always,
         }
+    }
+
+    fn when(mut self, when: ParamWhen) -> Self {
+        self.when = when;
+        self
     }
 
     fn unit(mut self, unit: &'static str) -> Self {
@@ -203,7 +242,20 @@ pub fn param_specs() -> Vec<ParamSpec> {
         .range(defaults::WEAK_VOLUME_PCT, limits::WEAK_VOLUME_PCT, 5.0),
         ParamSpec::number("length", "음원 길이 (l)", "비프 구간의 전체 길이입니다.")
             .unit("초")
-            .integer_range(defaults::LENGTH_SEC, limits::LENGTH_SEC),
+            .integer_range(defaults::LENGTH_SEC, limits::LENGTH_SEC)
+            .when(ParamWhen::WithoutMusic),
+        ParamSpec::number(
+            "beep-volume",
+            "비프 음량",
+            "비프 전체의 크기입니다. 0이면 비프 없이 음악만 나옵니다.",
+        )
+        .unit("%")
+        .range(defaults::BEEP_VOLUME_PCT, limits::VOLUME_PCT, 5.0)
+        .when(ParamWhen::WithMusic),
+        ParamSpec::number("music-volume", "음악 음량", "배경 음악의 크기입니다.")
+            .unit("%")
+            .range(defaults::MUSIC_VOLUME_PCT, limits::VOLUME_PCT, 5.0)
+            .when(ParamWhen::WithMusic),
         ParamSpec::number(
             "primary-freq",
             "강한 비프 주파수",
@@ -230,6 +282,8 @@ impl Default for TrackParams {
             subdivision: defaults::SUBDIVISION,
             weak_volume_pct: defaults::WEAK_VOLUME_PCT,
             length_sec: defaults::LENGTH_SEC,
+            beep_volume_pct: defaults::BEEP_VOLUME_PCT,
+            music_volume_pct: defaults::MUSIC_VOLUME_PCT,
             primary_freq: defaults::PRIMARY_FREQ,
             sub_freq: defaults::SUB_FREQ,
             sample_rate: defaults::SAMPLE_RATE,
@@ -244,6 +298,8 @@ impl TrackParams {
         check_u32("subdivision", self.subdivision, limits::SUBDIVISION)?;
         check_f64("weak-volume", self.weak_volume_pct, limits::WEAK_VOLUME_PCT)?;
         check_u32("length", self.length_sec, limits::LENGTH_SEC)?;
+        check_f64("beep-volume", self.beep_volume_pct, limits::VOLUME_PCT)?;
+        check_f64("music-volume", self.music_volume_pct, limits::VOLUME_PCT)?;
         check_f64("primary-freq", self.primary_freq, limits::FREQ)?;
         check_f64("sub-freq", self.sub_freq, limits::FREQ)?;
         if !limits::SAMPLE_RATES.contains(&self.sample_rate) {

@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-exclude = ["spike"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,3 +12,12 @@ repository = "https://github.com/iseohyun/beep-gen"
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# 의존 라이브러리는 개발 빌드에서도 최적화한다. 오디오 처리(템포 변환 등)가
+# 최적화 없이는 테스트하기 어려울 만큼 느리기 때문이다.
+[profile.dev.package."*"]
+opt-level = 2
+
+# 코어 자신도 같은 이유로 최적화한다(재샘플링·합성이 테스트 시간을 좌우한다).
+[profile.dev.package.beep-core]
+opt-level = 2
