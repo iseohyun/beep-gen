@@ -52,6 +52,35 @@ fn host_of(url: &str) -> Option<String> {
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
+/// 주소가 가리키는 파일의 이름(마지막 경로 토막). 없으면 `None`.
+///
+/// 한글 등은 주소에 `%EC%95%84` 꼴로 들어 있으므로 원래 글자로 되돌린다.
+pub fn file_name_of(url: &str) -> Option<String> {
+    let rest = url.trim().split_once("://")?.1;
+    let path = rest.split(['?', '#']).next()?.split_once('/')?.1;
+    let segment = path.rsplit('/').next()?;
+    let mut bytes = Vec::with_capacity(segment.len());
+    let mut raw = segment.bytes();
+    while let Some(byte) = raw.next() {
+        if byte == b'%' {
+            let pair = [raw.next(), raw.next()];
+            let hex = |digit: Option<u8>| digit.and_then(|d| (d as char).to_digit(16));
+            match (hex(pair[0]), hex(pair[1])) {
+                (Some(high), Some(low)) => bytes.push((high * 16 + low) as u8),
+                // 형식이 틀린 부분은 손대지 않고 그대로 둔다.
+                _ => {
+                    bytes.push(b'%');
+                    bytes.extend(pair.into_iter().flatten());
+                }
+            }
+        } else {
+            bytes.push(byte);
+        }
+    }
+    let name = String::from_utf8_lossy(&bytes).trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
 /// 스트리밍 서비스의 주소인지.
 pub fn is_streaming_service(url: &str) -> bool {
     host_of(url).is_some_and(|host| {
@@ -146,6 +175,27 @@ mod tests {
             Some("example.com")
         );
         assert_eq!(host_of("not a url"), None);
+    }
+
+    #[test]
+    fn extracts_file_names() {
+        let cases = [
+            (
+                "https://example.com/a/Queen%20-%20Song.mp3?x=1#t",
+                Some("Queen - Song.mp3"),
+            ),
+            (
+                "https://example.com/%EC%95%84%EC%9D%B4%EC%9C%A0.mp3",
+                Some("아이유.mp3"),
+            ),
+            ("https://example.com/100%.mp3", Some("100%.mp3")),
+            ("https://example.com/", None),
+            ("https://example.com", None),
+            ("not a url", None),
+        ];
+        for (url, expected) in cases {
+            assert_eq!(file_name_of(url).as_deref(), expected, "{url}");
+        }
     }
 
     #[test]

@@ -5,9 +5,10 @@
 
 use std::sync::Mutex;
 
-use beep_core::{MusicReport, OutputFormat, TrackParams};
+use beep_core::{MusicReport, OutputFormat, SongInfo, TrackParams};
 use beep_native::job::{self, IntroRequest, JobRequest};
-use beep_native::tts;
+use beep_native::song::{self, Identified};
+use beep_native::{fetch, tts};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
 use tauri::{Manager, State};
@@ -54,10 +55,35 @@ fn set_music(request: Request<'_>, state: State<'_, AppState>) -> Result<(), Str
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum MusicSource {
-    /// `set_music` 으로 미리 보낸 파일.
-    Upload,
+    /// `set_music` 으로 미리 보낸 파일. `name` 은 그 파일의 원래 이름이다.
+    Upload {
+        #[serde(default)]
+        name: Option<String>,
+    },
     /// 오디오 파일의 직접 주소.
     Url { url: String },
+}
+
+/// 배경 음악의 가수와 곡 제목을 알아낸다: 파일의 태그 → 파일 이름 → 로컬 AI.
+/// 알아내지 못하면 지어내지 않고 빈 값을 돌려준다.
+#[tauri::command]
+async fn identify_music(app: tauri::AppHandle, source: MusicSource) -> Result<Identified, String> {
+    // 로컬 AI 가 답하는 데 시간이 걸릴 수 있으므로 별도 스레드에서 한다.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        match source {
+            MusicSource::Upload { name } => {
+                let music = lock(&state.uploaded_music).clone();
+                song::identify(music.as_deref(), name.as_deref(), true)
+            }
+            // 주소는 아직 내려받기 전이므로 이름만 보고 찾는다.
+            MusicSource::Url { url } => {
+                song::identify(None, fetch::file_name_of(&url).as_deref(), true)
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("작업이 중단되었습니다: {e}"))
 }
 
 #[derive(Debug, Deserialize)]
@@ -74,6 +100,9 @@ struct GenerateRequest {
     format: String,
     music: Option<MusicSource>,
     intro: Option<IntroOptions>,
+    /// 화면에서 사용자가 확인한 가수와 곡.
+    #[serde(default)]
+    song: SongInfo,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,23 +144,29 @@ fn generate_blocking(
     let format = OutputFormat::from_extension(&request.format)
         .ok_or_else(|| format!("지원하지 않는 형식: {}", request.format))?;
 
+    let mut music_name = None;
     let music = match request.music {
         None => None,
         Some(MusicSource::Url { url }) => Some(job::MusicSource::Url(url)),
-        Some(MusicSource::Upload) => Some(job::MusicSource::Bytes(
-            lock(&state.uploaded_music)
-                .clone()
-                .ok_or("음악 파일이 전달되지 않았습니다.")?,
-        )),
+        Some(MusicSource::Upload { name }) => {
+            music_name = name;
+            Some(job::MusicSource::Bytes(
+                lock(&state.uploaded_music)
+                    .clone()
+                    .ok_or("음악 파일이 전달되지 않았습니다.")?,
+            ))
+        }
     };
     let job_request = JobRequest {
-        params,
-        format,
         music,
         intro: request.intro.map(|intro| IntroRequest {
             template: intro.template,
             voice: intro.voice_id,
         }),
+        // 가수와 곡은 화면에서 이미 찾아 사용자에게 보여줬다. 여기서 다시 찾지 않는다.
+        song: request.song,
+        music_name,
+        ..JobRequest::new(params, format)
     };
 
     let output = job::run(&job_request, |percent, stage| {
@@ -176,6 +211,7 @@ pub fn run() {
             describe,
             list_voices,
             set_music,
+            identify_music,
             generate,
             result_bytes,
             save_result

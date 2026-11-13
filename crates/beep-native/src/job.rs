@@ -7,9 +7,11 @@
 use std::path::PathBuf;
 
 use beep_core::{
-    MusicReport, OutputFormat, TrackInputs, TrackParams, build_track, default_file_name, intro_text,
+    MusicName, MusicReport, OutputFormat, SongInfo, TrackInputs, TrackParams, build_track,
+    intro_text, output_file_name,
 };
 
+use crate::song::{self, IdentifiedBy};
 use crate::{fetch, tts};
 
 /// 배경 음악을 어디서 가져올지.
@@ -43,20 +45,54 @@ pub struct IntroRequest {
     pub voice: Option<String>,
 }
 
+/// 결과 파일의 이름에 넣을 가수와 곡을 어떻게 정할지.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SongLookup {
+    /// 요청에 적힌 것만 쓴다(화면에서 사용자가 이미 확인한 경우, 이름이 필요 없는 경우).
+    #[default]
+    Given,
+    /// 요청에 없는 것은 음악 파일의 태그와 파일 이름에서 찾는다.
+    Detect,
+    /// 그래도 모르면 로컬 AI 에 묻는다.
+    DetectWithAi,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobRequest {
     pub params: TrackParams,
     pub format: OutputFormat,
     pub music: Option<MusicSource>,
     pub intro: Option<IntroRequest>,
+    /// 사용자가 알려준 가수와 곡. 모르는 쪽은 비워 둔다.
+    pub song: SongInfo,
+    /// 원래 음악 파일의 이름. 생략하면 경로나 주소에서 얻는다.
+    pub music_name: Option<String>,
+    pub song_lookup: SongLookup,
+}
+
+impl JobRequest {
+    /// 비프만 만드는 기본 요청. 필요한 항목만 바꿔 쓴다.
+    pub fn new(params: TrackParams, format: OutputFormat) -> Self {
+        Self {
+            params,
+            format,
+            music: None,
+            intro: None,
+            song: SongInfo::default(),
+            music_name: None,
+            song_lookup: SongLookup::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobOutput {
     /// 완성된 파일 바이트.
     pub bytes: Vec<u8>,
-    /// 설정값에 맞는 기본 파일 이름.
+    /// 규칙에 따라 지은 파일 이름. 예: `[1.4초] 가수 - 곡.mp3`
     pub file_name: String,
+    /// 파일 이름에 쓴 가수와 곡. 몰라서 원래 파일 이름을 썼으면 비어 있다.
+    pub song: SongInfo,
     /// 배경 음악을 넣었을 때의 보고.
     pub music_report: Option<MusicReport>,
     /// 맨 앞 안내 구간의 길이(초). 안내 음성이 없으면 0.
@@ -110,8 +146,12 @@ pub fn run(
         }
     };
 
-    // 안내 음성을 만들지 못해도 음원은 만든다. 대신 그 사실을 알린다.
     let mut notices = Vec::new();
+    let music_name = music
+        .as_deref()
+        .map(|bytes| name_music(request, bytes, &mut notices));
+
+    // 안내 음성을 만들지 못해도 음원은 만든다. 대신 그 사실을 알린다.
     let intro = request.intro.as_ref().and_then(|intro| {
         let text = intro_text(&intro.template, &request.params);
         if text.is_empty() {
@@ -145,11 +185,52 @@ pub fn run(
 
     Ok(JobOutput {
         bytes: output.bytes,
-        file_name: default_file_name(&request.params, request.format, music.is_some()),
+        file_name: output_file_name(&request.params, request.format, music_name.as_ref()),
+        song: music_name.map(|name| name.song).unwrap_or_default(),
         music_report: output.music,
         intro_seconds: output.intro_seconds,
         notices,
     })
+}
+
+/// 결과 파일의 이름에 쓸, 배경 음악에 대해 아는 것을 모은다.
+fn name_music(request: &JobRequest, bytes: &[u8], notices: &mut Vec<String>) -> MusicName {
+    let source_name = request
+        .music_name
+        .clone()
+        .or_else(|| match request.music.as_ref()? {
+            MusicSource::Path(path) => Some(path.file_name()?.to_string_lossy().into_owned()),
+            MusicSource::Url(url) => fetch::file_name_of(url),
+            MusicSource::Bytes(_) => None,
+        });
+    let mut song = request.song.clone().cleaned();
+
+    // 사용자가 곡 제목을 알려줬으면 더 찾지 않는다.
+    let ask_ai = request.song_lookup == SongLookup::DetectWithAi;
+    if request.song_lookup != SongLookup::Given && song.title.is_none() {
+        let found = song::identify(Some(bytes), source_name.as_deref(), ask_ai);
+        if let Some(problem) = found.problem {
+            notices.push(format!(
+                "{problem} 파일 이름은 원래 음악 파일의 이름으로 지었습니다."
+            ));
+        }
+        if found.by == Some(IdentifiedBy::Ai) {
+            let label = [found.song.artist.as_deref(), found.song.title.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" - ");
+            notices.push(format!(
+                "가수와 곡 이름은 로컬 AI({})가 파일 이름에서 추정했습니다: {label}. 틀릴 수 있으니 확인해 주세요.",
+                found.model.as_deref().unwrap_or("Ollama")
+            ));
+        }
+        song = SongInfo {
+            artist: song.artist.or(found.song.artist),
+            title: found.song.title,
+        };
+    }
+    MusicName { song, source_name }
 }
 
 /// 식별자 또는 이름(일부)으로 음성을 찾아 식별자를 돌려준다.
@@ -167,15 +248,54 @@ mod tests {
     use super::*;
 
     fn request() -> JobRequest {
-        JobRequest {
-            params: TrackParams {
+        JobRequest::new(
+            TrackParams {
                 length_sec: 1,
                 ..TrackParams::default()
             },
-            format: OutputFormat::Wav,
-            music: None,
-            intro: None,
-        }
+            OutputFormat::Wav,
+        )
+    }
+
+    /// 박자가 있는 8초짜리 음악 파일의 내용.
+    fn music_bytes() -> Vec<u8> {
+        let params = TrackParams {
+            interval_sec: 0.5,
+            subdivision: 1,
+            length_sec: 8,
+            ..TrackParams::default()
+        };
+        build_track(&params, OutputFormat::Wav, TrackInputs::default(), |_| {})
+            .unwrap()
+            .bytes
+    }
+
+    #[test]
+    fn names_follow_the_song_when_known() {
+        let mut req = request();
+        req.music = Some(MusicSource::Bytes(music_bytes()));
+        req.music_name = Some("Queen - We Will Rock You.mp3".into());
+
+        // 화면에서 확인한 값만 쓰는 경우: 적힌 것이 없으면 원래 파일 이름.
+        let output = run(&req, |_, _| {}).unwrap();
+        assert_eq!(output.file_name, "[1초] Queen - We Will Rock You.wav");
+        assert!(output.song.is_empty());
+
+        req.song = SongInfo::new(None, Some("직접 적은 곡"));
+        let output = run(&req, |_, _| {}).unwrap();
+        assert_eq!(output.file_name, "[1초] 직접 적은 곡.wav");
+
+        // 찾아보는 경우: 파일 이름에서 가수와 곡을 나눈다. 사용자가 적은 가수는 그대로 둔다.
+        req.song = SongInfo::new(Some("퀸"), None);
+        req.song_lookup = SongLookup::Detect;
+        let output = run(&req, |_, _| {}).unwrap();
+        assert_eq!(output.file_name, "[1초] 퀸 - We Will Rock You.wav");
+        assert_eq!(output.song.title.as_deref(), Some("We Will Rock You"));
+        assert!(output.notices.is_empty(), "{:?}", output.notices);
+
+        req.music_name = Some("track07.mp3".into());
+        let output = run(&req, |_, _| {}).unwrap();
+        assert_eq!(output.file_name, "[1초] track07.wav");
     }
 
     #[test]
@@ -198,7 +318,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(output.bytes.len(), 44 + 44_100 * 2);
-        assert_eq!(output.file_name, "beep_n1s_m2_l1s.wav");
+        assert_eq!(output.file_name, "[1초] beep.wav");
         assert!(output.notices.is_empty());
         assert_eq!(stages.last().unwrap().0, 100);
     }

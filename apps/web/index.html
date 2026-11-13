@@ -38,6 +38,27 @@
               aria-describedby="music-hint"
             />
           </div>
+          <div id="song-row" class="field-control" hidden>
+            <input
+              id="song-artist"
+              type="text"
+              placeholder="가수"
+              aria-label="가수"
+              aria-describedby="song-status"
+              autocomplete="off"
+              maxlength="80"
+            />
+            <input
+              id="song-title"
+              type="text"
+              placeholder="곡 제목"
+              aria-label="곡 제목"
+              aria-describedby="song-status"
+              autocomplete="off"
+              maxlength="80"
+            />
+          </div>
+          <p id="song-status" class="hint" role="status" hidden></p>
           <p id="music-hint" class="hint">
             음악을 넣으면 비프 템포에 맞춰 속도를 바꿔 함께 넣습니다. 음원 길이는 음악 길이를 따릅니다.
             파일은 이 기기 밖으로 나가지 않습니다.

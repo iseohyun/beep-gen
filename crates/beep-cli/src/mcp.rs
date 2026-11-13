@@ -10,8 +10,10 @@
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use beep_core::{DEFAULT_INTRO_TEMPLATE, OutputFormat, ParamKind, TrackParams, param_specs};
-use beep_native::job::{self, IntroRequest, JobRequest, MusicSource};
+use beep_core::{
+    DEFAULT_INTRO_TEMPLATE, OutputFormat, ParamKind, SongInfo, TrackParams, param_specs,
+};
+use beep_native::job::{self, IntroRequest, JobRequest, MusicSource, SongLookup};
 use beep_native::{fetch, tts};
 use serde_json::{Map, Value, json};
 
@@ -161,7 +163,25 @@ fn tools() -> Value {
         "output".into(),
         json!({
             "type": "string",
-            "description": "저장할 파일의 절대 경로. 확장자(.mp3 또는 .wav)로 형식이 정해집니다.",
+            "description": "저장할 곳의 절대 경로. 파일 경로를 주면 확장자(.mp3 또는 .wav)로 형식이 정해집니다. \
+이미 있는 폴더를 주면 그 안에 \"[주기초] 가수 - 곡.mp3\" 꼴로 이름을 지어 저장합니다\
+(음악이 없으면 \"[주기초] beep.mp3\", 곡을 모르면 원래 음악 파일의 이름).",
+        }),
+    );
+    properties.insert(
+        "artist".into(),
+        json!({
+            "type": "string",
+            "description": "배경 음악의 가수. output 이 폴더일 때 파일 이름에 씁니다. \
+알고 있거나 찾아서 확인할 수 있으면 넣어 주세요. 생략하면 음악 파일의 태그와 파일 이름에서 찾습니다.",
+        }),
+    );
+    properties.insert(
+        "title".into(),
+        json!({
+            "type": "string",
+            "description": "배경 음악의 곡 제목. output 이 폴더일 때 파일 이름에 씁니다. \
+알고 있거나 찾아서 확인할 수 있으면 넣어 주세요. 생략하면 음악 파일의 태그와 파일 이름에서 찾습니다.",
         }),
     );
     properties.insert(
@@ -198,14 +218,14 @@ fn tools() -> Value {
         json!({
             "type": "string",
             "enum": formats,
-            "description": "출력 형식. 생략하면 output 의 확장자를 따릅니다.",
+            "description": "출력 형식. 생략하면 output 의 확장자를 따르고, output 이 폴더이면 mp3 입니다.",
         }),
     );
     properties.insert(
         "overwrite".into(),
         json!({
             "type": "boolean",
-            "description": "output 경로에 파일이 이미 있을 때 덮어쓸지. 기본은 덮어쓰지 않고 오류를 냅니다.",
+            "description": "저장할 자리에 파일이 이미 있을 때 덮어쓸지. 기본은 덮어쓰지 않고 오류를 냅니다.",
             "default": false,
         }),
     );
@@ -214,7 +234,8 @@ fn tools() -> Value {
         {
             "name": TOOL_CREATE,
             "description": "일정한 주기로 비프음이 울리는 오디오 파일을 만들어 지정한 경로에 저장합니다. \
-    배경 음악을 주면 비프 템포에 맞춰 속도를 바꿔 함께 넣고(길이는 음악을 따름), 맨 앞에 안내 음성을 넣습니다.",
+    배경 음악을 주면 비프 템포에 맞춰 속도를 바꿔 함께 넣고(길이는 음악을 따름), 맨 앞에 안내 음성을 넣습니다. \
+    output 에 폴더를 주면 파일 이름을 자동으로 짓습니다.",
             "inputSchema": {
                 "type": "object",
                 "properties": properties,
@@ -315,8 +336,10 @@ fn create_track(
     on_progress: impl FnMut(u8, &str),
 ) -> Result<String, String> {
     let output = take_string(&mut arguments, "output")?
-        .ok_or("output(저장할 파일의 절대 경로)이 필요합니다")?;
+        .ok_or("output(저장할 파일 또는 폴더의 절대 경로)이 필요합니다")?;
     let music = take_string(&mut arguments, "music")?;
+    let artist = take_string(&mut arguments, "artist")?;
+    let title = take_string(&mut arguments, "title")?;
     let intro_text = take_string(&mut arguments, "intro_text")?;
     let voice = take_string(&mut arguments, "voice")?;
     let format_name = take_string(&mut arguments, "format")?;
@@ -341,12 +364,26 @@ fn create_track(
         .map_err(|e| format!("잘못된 설정값: {e}"))?;
 
     let output = PathBuf::from(output);
-    let format = resolve_format(&output, format_name.as_deref())?;
-    check_output_path(&output, overwrite)?;
+    // 폴더를 주면 파일 이름은 음원을 만든 뒤에(가수와 곡을 알아낸 뒤에) 정해진다.
+    let into_folder = output.is_dir();
+    let format = if into_folder {
+        match format_name.as_deref() {
+            Some(name) => OutputFormat::from_extension(name)
+                .ok_or_else(|| format!("지원하지 않는 형식입니다: {name}"))?,
+            None => OutputFormat::default(),
+        }
+    } else {
+        resolve_format(&output, format_name.as_deref())?
+    };
+    if into_folder {
+        if !output.is_absolute() {
+            return Err(not_absolute(&output));
+        }
+    } else {
+        check_output_path(&output, overwrite)?;
+    }
 
     let request = JobRequest {
-        params,
-        format,
         music: music
             .as_deref()
             .filter(|m| !m.trim().is_empty())
@@ -355,13 +392,29 @@ fn create_track(
             template: intro_text.unwrap_or_else(|| DEFAULT_INTRO_TEMPLATE.to_owned()),
             voice: voice.filter(|v| !v.trim().is_empty()),
         }),
+        song: SongInfo::new(artist.as_deref(), title.as_deref()),
+        // 이 도구를 부르는 쪽이 AI 이므로 로컬 AI 에는 묻지 않는다.
+        song_lookup: if into_folder {
+            SongLookup::Detect
+        } else {
+            SongLookup::Given
+        },
+        ..JobRequest::new(params, format)
     };
     let result = job::run(&request, on_progress).map_err(|e| e.to_string())?;
 
+    let output = if into_folder {
+        let path = output.join(&result.file_name);
+        check_output_path(&path, overwrite)?;
+        path
+    } else {
+        output
+    };
     std::fs::write(&output, &result.bytes)
         .map_err(|e| format!("{} 에 저장하지 못했습니다: {e}", output.display()))?;
     let summary = json!({
         "output": output.display().to_string(),
+        "song": result.song,
         "format": format.extension(),
         "bytes": result.bytes.len(),
         "intro_seconds": result.intro_seconds,
@@ -398,13 +451,17 @@ fn resolve_format(output: &Path, format: Option<&str>) -> Result<OutputFormat, S
     }
 }
 
+fn not_absolute(output: &Path) -> String {
+    format!(
+        "output 은 절대 경로여야 합니다(서버의 현재 폴더는 예측할 수 없습니다): {}",
+        output.display()
+    )
+}
+
 /// 저장 경로가 쓸 수 있는 곳인지 확인한다.
 fn check_output_path(output: &Path, overwrite: bool) -> Result<(), String> {
     if !output.is_absolute() {
-        return Err(format!(
-            "output 은 절대 경로여야 합니다(서버의 현재 폴더는 예측할 수 없습니다): {}",
-            output.display()
-        ));
+        return Err(not_absolute(output));
     }
     if !output.parent().is_some_and(Path::is_dir) {
         return Err(format!("저장할 폴더가 없습니다: {}", output.display()));
@@ -529,6 +586,29 @@ mod tests {
             44 + 2 * 44_100 * 2
         );
         assert_eq!(summary["bytes"], 44 + 2 * 44_100 * 2);
+    }
+
+    #[test]
+    fn a_folder_output_gets_an_automatic_file_name() {
+        let folder = temp_path("auto-name");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let arguments = json!({ "output": folder, "interval": 1.4, "length": 1, "intro_text": "",
+                                "artist": "쓰이지 않음", "format": "wav" });
+
+        let replies = talk(&[call(1, TOOL_CREATE, arguments.clone())]);
+        let result = &replies[0]["result"];
+        assert_eq!(result["isError"], false, "{result}");
+        let summary: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        // 음악이 없으면 가수를 줘도 정해진 이름을 쓴다.
+        let expected = folder.join("[1.4초] beep.wav");
+        assert_eq!(summary["output"], expected.display().to_string());
+        assert!(expected.is_file());
+
+        // 같은 이름이 이미 있으면 덮어쓰지 않는다.
+        let replies = talk(&[call(2, TOOL_CREATE, arguments)]);
+        assert_eq!(replies[0]["result"]["isError"], true);
     }
 
     #[test]

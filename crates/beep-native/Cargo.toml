@@ -1,6 +1,6 @@
 [package]
 name = "beep-native"
-description = "로컬 환경 어댑터: OS 내장 TTS, URL 다운로드. 계산 로직은 두지 않는다."
+description = "로컬 환경 어댑터: OS 내장 TTS, URL 다운로드, 로컬 AI(Ollama). 계산 로직은 두지 않는다."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 beep-core = { version = "0.1.0", path = "../beep-core" }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 ureq = "3"
 
 [target."cfg(windows)".dependencies]

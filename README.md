@@ -77,7 +77,29 @@ target/release/beep-gen -n 1.4 -m 2 --music https://example.com/song.mp3
 # 시작 안내 음성: 기본 문구는 "{n}초, {n}초 비프". 바꾸거나(-t), 빼려면 -t ""
 target/release/beep-gen -n 1.4 -m 2 -t "{n}초 템포" --tts-voice Heami
 target/release/beep-gen --list-voices
+
+# 저장 경로(-o)를 생략하면 이름을 자동으로 짓는다: "[1.4초] 가수 - 곡.mp3"
+target/release/beep-gen -n 1.4 --music "IU - Blueming.mp3"
+target/release/beep-gen -n 1.4 --music track07.mp3 --artist 아이유 --title Blueming
 ```
+
+#### 결과 파일 이름
+
+`-o` 를 주지 않으면 `[{주기}초] {가수} - {곡}.{확장자}` 꼴로 이름을 짓습니다.
+
+| 상황 | 이름 |
+| :--- | :--- |
+| 음악 없음 | `[1.4초] beep.mp3` |
+| 가수와 곡을 앎 | `[1.4초] 아이유 - Blueming.mp3` |
+| 곡만 앎 | `[1.4초] Blueming.mp3` |
+| 곡을 모름 | `[1.4초] 원래 음악 파일 이름.mp3` |
+
+가수와 곡은 다음 순서로 찾습니다. 찾지 못하면 지어내지 않고 원래 파일 이름을 씁니다.
+
+1. 음악 파일에 적힌 태그(ID3 등)
+2. `가수 - 곡` 꼴의 파일 이름
+3. 이 컴퓨터의 로컬 AI([Ollama](https://ollama.com)) — CLI와 데스크톱 앱에서만. 파일 이름만 보내며, 추정한 결과는 "틀릴 수 있다"고 알립니다. Ollama가 없으면 건너뜁니다. `--no-ai` 로 끌 수 있고, 주소는 `OLLAMA_HOST`, 모델은 `BEEP_GEN_AI_MODEL` 환경 변수로 바꿉니다.
+4. 직접 입력: CLI는 `--artist`·`--title`, 화면에서는 가수·곡 칸
 
 배경 음악은 MP3, WAV, FLAC, OGG, M4A를 받습니다. 음악의 한 박을 비프 간격의 0.5·1·2배 중 가장 가까운 쪽에 맞추며, 박자가 일정한 곡에서 잘 동작합니다. `--beep-volume 0` 으로 템포만 맞춘 음악을 얻을 수 있습니다.
 
@@ -88,7 +110,7 @@ target/release/beep-gen --list-voices
 | `crates/beep-wasm` | 코어의 웹(WASM) 연결부 |
 | `apps/web` | 웹 앱 (TypeScript + Vite, PWA) |
 | `apps/desktop` | 데스크톱 앱 (Tauri, 화면은 `apps/web` 을 그대로 사용) |
-| `crates/beep-native` | 로컬 어댑터: Windows 내장 TTS, URL 다운로드, 음원 생성 공용 절차 |
+| `crates/beep-native` | 로컬 어댑터: Windows 내장 TTS, URL 다운로드, 로컬 AI(Ollama), 음원 생성 공용 절차 |
 | `xtask` | 빌드 작업 (WASM 바인딩 생성) |
 | `tools/parity_check.py` | Python 구현과 결과를 비교하는 검사 |
 | `tools/check_align.py` | 배경 음악과 비프의 정렬을 측정하는 도구 |
@@ -106,7 +128,7 @@ npm run build      # 결과물: 저장소 루트의 dist/
 npm run preview    # http://localhost:4173 에서 확인
 ```
 
-기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-t`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume`, `--tts-voice`, `--list-voices` 가 추가되었습니다.
+기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-t`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume`, `--tts-voice`, `--list-voices`, `--artist`, `--title`, `--no-ai` 가 추가되었습니다. `-o` 를 생략했을 때의 파일 이름은 Python 버전과 다릅니다(위의 "결과 파일 이름" 참고).
 
 - **안내 음성(TTS)** 은 Windows 내장 음성으로 만듭니다(인터넷 불필요). 다른 운영체제에서는 안내 음성 없이 만들어집니다.
 - **음악 주소** 는 오디오 파일을 바로 내려받을 수 있는 주소만 받습니다. YouTube 등 스트리밍 서비스 주소는 저작권 문제로 지원하지 않습니다. 필요하다면 이 프로젝트를 포크(fork)해 직접 기능을 추가해 사용하시기 바랍니다. `-n` 은 소수(예: 1.4)를 받습니다.
@@ -145,7 +167,7 @@ claude mcp add beep-gen -- C:/경로/beep-gen.exe mcp
 
 | 도구 | 하는 일 |
 | :--- | :--- |
-| `create_track` | 음원을 만들어 지정한 경로에 저장합니다. CLI와 같은 설정값에 더해 `output`(절대 경로, 필수), `music`(파일 경로 또는 오디오 파일의 직접 주소), `intro_text`, `voice`, `overwrite` 를 받습니다. |
+| `create_track` | 음원을 만들어 지정한 경로에 저장합니다. CLI와 같은 설정값에 더해 `output`(절대 경로, 필수), `music`(파일 경로 또는 오디오 파일의 직접 주소), `artist`, `title`, `intro_text`, `voice`, `overwrite` 를 받습니다. `output` 에 폴더를 주면 `[1.4초] 가수 - 곡.mp3` 꼴로 이름을 자동으로 짓습니다. |
 | `list_voices` | 안내 음성에 쓸 수 있는 목소리 목록을 돌려줍니다. |
 
 이미 있는 파일은 `overwrite` 를 `true` 로 주지 않으면 덮어쓰지 않습니다.

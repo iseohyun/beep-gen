@@ -9,11 +9,12 @@ use symphonia::core::audio::sample::Sample;
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, TrackType};
+use symphonia::core::formats::{FormatOptions, FormatReader, TrackType};
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
+use symphonia::core::meta::{MetadataOptions, StandardTag};
 
 use crate::error::{Error, Result};
+use crate::naming::SongInfo;
 
 /// 디코딩된 오디오. 채널은 1(모노) 또는 2(스테레오)이며, 샘플은 채널이 번갈아 나온다.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,19 +51,57 @@ impl Audio {
     }
 }
 
-/// 음악 파일 바이트를 디코딩한다.
-///
-/// 3채널 이상은 앞의 두 채널(보통 좌·우)만 쓴다.
-pub fn decode_audio(bytes: &[u8]) -> Result<Audio> {
+/// 파일 내용을 열어 형식을 판별한다.
+fn open(bytes: &[u8]) -> Result<Box<dyn FormatReader>> {
     let source = MediaSourceStream::new(Box::new(Cursor::new(bytes.to_vec())), Default::default());
-    let mut format = symphonia::default::get_probe()
+    symphonia::default::get_probe()
         .probe(
             &Hint::new(),
             source,
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|e| Error::Decode(format!("지원하지 않는 파일 형식입니다 ({e})")))?;
+        .map_err(|e| Error::Decode(format!("지원하지 않는 파일 형식입니다 ({e})")))
+}
+
+/// 음악 파일에 적힌 가수와 곡 제목(ID3 등의 태그)을 읽는다.
+///
+/// 소리는 풀지 않으므로 빠르다. 태그가 없거나 읽을 수 없는 파일이면 빈 값을 돌려준다.
+pub fn read_song_tags(bytes: &[u8]) -> SongInfo {
+    let Ok(mut format) = open(bytes) else {
+        return SongInfo::default();
+    };
+    let mut song = SongInfo::default();
+    let mut metadata = format.metadata();
+    // 태그는 여러 묶음(파일 앞·뒤, 형식별)으로 올 수 있다. 먼저 나온 값을 쓴다.
+    loop {
+        if let Some(revision) = metadata.current() {
+            let containers = std::iter::once(&revision.media)
+                .chain(revision.per_track.iter().map(|track| &track.metadata));
+            for tag in containers.flat_map(|container| &container.tags) {
+                match &tag.std {
+                    Some(StandardTag::Artist(value)) if song.artist.is_none() => {
+                        song.artist = Some(value.to_string());
+                    }
+                    Some(StandardTag::TrackTitle(value)) if song.title.is_none() => {
+                        song.title = Some(value.to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if metadata.pop().is_none() {
+            break;
+        }
+    }
+    song.cleaned()
+}
+
+/// 음악 파일 바이트를 디코딩한다.
+///
+/// 3채널 이상은 앞의 두 채널(보통 좌·우)만 쓴다.
+pub fn decode_audio(bytes: &[u8]) -> Result<Audio> {
+    let mut format = open(bytes)?;
 
     let track = format
         .default_track(TrackType::Audio)

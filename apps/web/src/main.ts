@@ -13,6 +13,7 @@ import type {
   ParamSpec,
   ParamValues,
   Platform,
+  SongGuess,
 } from "./platform";
 import { APP_VERSION, BUILD_TAG } from "./version";
 
@@ -86,17 +87,31 @@ function createField(spec: ParamSpec, initial: number): HTMLElement {
     }
     control.value = String(spec.choices.includes(initial) ? initial : spec.default);
   } else {
-    control = el("input", {
+    const input = el("input", {
       id: inputId,
       type: "number",
       inputMode: spec.kind === "integer" ? "numeric" : "decimal",
-      min: String(spec.min),
       max: String(spec.max),
-      // 소수 항목은 증감 단위와 무관하게 어떤 값이든 받는다(예: 1.4, 1.25).
-      step: spec.kind === "integer" ? "1" : "any",
+      step: String(spec.kind === "integer" ? 1 : spec.step),
       required: true,
       value: String(initial),
     });
+    if (spec.kind === "integer") {
+      input.min = String(spec.min);
+    } else {
+      // 소수 항목은 화살표로는 증감 단위(예: 0.1)만큼 움직이되, 직접 적을 때는 어떤 값이든
+      // 받는다(예: 1.25). 브라우저는 "기준값 + 단위의 배수" 만 받으므로, 기준값을 늘 지금 값에
+      // 맞춘다. 기준값은 최솟값 속성이 있으면 그쪽을 따르기 때문에, 최솟값은 속성으로 두지 않고
+      // 제출할 때 직접 검사한다(readParams).
+      input.dataset.min = String(spec.min);
+      const followValue = (): void => {
+        input.setAttribute("value", input.value);
+        input.setCustomValidity("");
+      };
+      followValue();
+      input.addEventListener("input", followValue);
+    }
+    control = input;
   }
   control.dataset.key = spec.key;
   control.setAttribute("aria-describedby", hintId);
@@ -128,6 +143,11 @@ function applyMusicState(form: HTMLFormElement, hasMusic: boolean): void {
 
 /** 폼에서 현재 값을 읽는다. 범위를 벗어난 칸이 있으면 그 칸을 알려주고 null 을 돌려준다. */
 function readParams(form: HTMLFormElement, info: AppInfo): ParamValues | null {
+  for (const input of form.querySelectorAll<HTMLInputElement>("input[data-min]")) {
+    const min = Number(input.dataset.min);
+    const tooSmall = !input.disabled && input.value !== "" && Number(input.value) < min;
+    input.setCustomValidity(tooSmall ? `값은 ${min} 이상이어야 합니다.` : "");
+  }
   if (!form.reportValidity()) return null;
   const values: ParamValues = {};
   for (const spec of info.params) {
@@ -140,6 +160,23 @@ function readParams(form: HTMLFormElement, info: AppInfo): ParamValues | null {
     values[spec.key] = Number.isFinite(value) && control.value !== "" ? value : spec.default;
   }
   return values;
+}
+
+/** 가수와 곡을 어디서 알아냈는지 사용자에게 알리는 문구. */
+function describeGuess(guess: SongGuess): string {
+  const fallback = "비워 두면 원래 파일 이름을 씁니다.";
+  switch (guess.by) {
+    case "tags":
+      return "음악 파일에 적힌 정보에서 찾았습니다. 틀리면 고쳐 주세요.";
+    case "file-name":
+      return "파일 이름에서 찾았습니다. 틀리면 고쳐 주세요.";
+    case "ai":
+      return `로컬 AI(${guess.model ?? "Ollama"})가 파일 이름에서 추정했습니다. 틀릴 수 있으니 확인해 주세요.`;
+    default:
+      return guess.problem
+        ? `${guess.problem} 가수와 곡 제목을 직접 적어 주세요. ${fallback}`
+        : `가수와 곡 제목을 찾지 못했습니다. 직접 적어 주세요. ${fallback}`;
+  }
 }
 
 /** 배경 음악을 어떻게 맞췄는지와 알림을 보여준다. */
@@ -179,6 +216,10 @@ async function start(platform: Platform): Promise<void> {
   const musicClear = byId<HTMLButtonElement>("music-clear");
   const musicUrlRow = byId("music-url-row");
   const musicUrl = byId<HTMLInputElement>("music-url");
+  const songRow = byId("song-row");
+  const songArtist = byId<HTMLInputElement>("song-artist");
+  const songTitle = byId<HTMLInputElement>("song-title");
+  const songStatus = byId("song-status");
   const introSection = byId("intro-section");
   const introTemplate = byId<HTMLInputElement>("intro-template");
   const introVoice = byId<HTMLSelectElement>("intro-voice");
@@ -218,7 +259,7 @@ async function start(platform: Platform): Promise<void> {
   /** 지금 고른 배경 음악. 파일이 주소보다 우선한다. */
   const selectedMusic = (): MusicSource | null => {
     const file = musicInput.files?.[0];
-    if (file) return { kind: "file", file };
+    if (file) return { kind: "file", file, name: file.name };
     const url = capabilities.musicUrl ? musicUrl.value.trim() : "";
     return url ? { kind: "url", url } : null;
   };
@@ -227,8 +268,51 @@ async function start(platform: Platform): Promise<void> {
     musicClear.hidden = !hasFile;
     // 파일을 골랐으면 주소 칸은 쓰이지 않으므로 숨긴다.
     musicUrlRow.hidden = !capabilities.musicUrl || hasFile;
-    applyMusicState(form, selectedMusic() !== null);
+    const hasMusic = selectedMusic() !== null;
+    songRow.hidden = !hasMusic;
+    songStatus.hidden = !hasMusic;
+    applyMusicState(form, hasMusic);
   };
+
+  // 음악을 고르면 가수와 곡 제목을 찾아 칸에 채운다. 결과 파일의 이름에 쓰인다.
+  /** 지금 진행 중인 찾기. 음원을 만들기 전에 끝나기를 기다린다. */
+  let identifying: Promise<void> = Promise.resolve();
+  /** 음악을 바꿀 때마다 올라간다. 늦게 도착한 이전 음악의 결과를 버리는 데 쓴다. */
+  let identifyRun = 0;
+  /** 찾는 동안 사용자가 칸을 직접 고쳤는지. 고쳤으면 덮어쓰지 않는다. */
+  let songEdited = false;
+  const identifySelected = (): void => {
+    const music = selectedMusic();
+    const run = ++identifyRun;
+    songEdited = false;
+    songArtist.value = "";
+    songTitle.value = "";
+    if (!music) {
+      identifying = Promise.resolve();
+      return;
+    }
+    songStatus.textContent = "가수와 곡 제목을 찾는 중…";
+    identifying = platform
+      .identifyMusic(music)
+      .catch((error: unknown): SongGuess => {
+        return { artist: null, title: null, by: null, problem: errorMessage(error) };
+      })
+      .then((guess) => {
+        if (run !== identifyRun) return;
+        if (songEdited) {
+          songStatus.textContent = "비워 두면 원래 파일 이름을 씁니다.";
+          return;
+        }
+        songArtist.value = guess.artist ?? "";
+        songTitle.value = guess.title ?? "";
+        songStatus.textContent = describeGuess(guess);
+      });
+  };
+  for (const input of [songArtist, songTitle]) {
+    input.addEventListener("input", () => {
+      songEdited = true;
+    });
+  }
 
   const saved = loadSettings();
   const render = (values: ParamValues, format: string): void => {
@@ -337,18 +421,32 @@ async function start(platform: Platform): Promise<void> {
     return { template, voiceId: introVoice.value || undefined };
   };
 
-  musicInput.addEventListener("change", refreshMusicState);
+  musicInput.addEventListener("change", () => {
+    refreshMusicState();
+    identifySelected();
+  });
   musicUrl.addEventListener("input", refreshMusicState);
+  // 주소는 다 적은 뒤(칸을 벗어날 때)에 한 번만 찾는다.
+  musicUrl.addEventListener("change", identifySelected);
   musicClear.addEventListener("click", () => {
     musicInput.value = "";
     refreshMusicState();
+    identifySelected();
   });
 
   let track: GeneratedTrack | null = null;
   let playerUrl: string | null = null;
 
   const setBusy = (busy: boolean): void => {
-    for (const control of [generateButton, resetButton, musicInput, musicClear, musicUrl]) {
+    for (const control of [
+      generateButton,
+      resetButton,
+      musicInput,
+      musicClear,
+      musicUrl,
+      songArtist,
+      songTitle,
+    ]) {
       control.disabled = busy;
     }
     progress.hidden = !busy;
@@ -373,8 +471,11 @@ async function start(platform: Platform): Promise<void> {
     status.textContent = "음원을 만드는 중입니다…";
     const startedAt = performance.now();
     try {
+      // 가수와 곡을 찾는 중이면 끝나기를 기다린다(파일 이름에 쓰이므로).
+      await identifying;
+      const song = { artist: songArtist.value.trim(), title: songTitle.value.trim() };
       track = await platform.generate(
-        { params, format, music: selectedMusic(), intro: selectedIntro() },
+        { params, format, music: selectedMusic(), song, intro: selectedIntro() },
         (update) => {
           progress.value = update.percent;
           status.textContent = `${update.stage}… ${update.percent}%`;

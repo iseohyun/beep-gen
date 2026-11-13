@@ -3,7 +3,7 @@
 //! 자바스크립트와 값을 주고받는 일만 한다. 소리를 만드는 계산은 전부 코어에 있다.
 //! 파라미터는 JSON 문자열로 받는다. 필드 이름은 CLI 옵션 이름과 같다(예: `weak-volume`).
 
-use beep_core::{OutputFormat, TrackInputs, TrackParams};
+use beep_core::{MusicName, OutputFormat, TrackInputs, TrackParams};
 use wasm_bindgen::prelude::*;
 
 fn parse_params(params_json: &str) -> Result<TrackParams, JsError> {
@@ -58,9 +58,25 @@ pub fn intro_text(template: &str, params_json: &str) -> Result<String, JsError> 
     Ok(beep_core::intro_text(template, &parse_params(params_json)?))
 }
 
+/// 음악 파일의 내용(태그)과 이름에서 가수와 곡 제목을 찾아 JSON 으로 돌려준다:
+/// `{"artist": 문자열|null, "title": 문자열|null, "by": "tags"|"file-name"|null}`.
+/// 찾지 못하면 지어내지 않고 모두 `null` 이다.
+#[wasm_bindgen]
+pub fn identify_song(music: Option<Vec<u8>>, source_name: Option<String>) -> String {
+    let guess = beep_core::identify_song(music.as_deref(), source_name.as_deref());
+    serde_json::json!({
+        "artist": guess.song.artist,
+        "title": guess.song.title,
+        "by": guess.source,
+    })
+    .to_string()
+}
+
 /// 음원을 만든다.
 ///
 /// `music` 에 음악 파일 바이트를 주면 비프 템포에 맞춰 함께 넣는다.
+/// `music_name_json` 은 결과 파일의 이름을 짓는 데 쓰는 정보다:
+/// `{"song": {"artist": .., "title": ..}, "source_name": "원래 파일 이름"}` (모두 생략 가능).
 /// `intro` 에 안내 음성 파일 바이트를 주면 맨 앞에 넣는다.
 /// `on_progress(percent, stageKey, stageLabel)` 는 진행 상황이 바뀔 때마다 호출된다.
 #[wasm_bindgen]
@@ -68,11 +84,18 @@ pub fn build_track(
     params_json: &str,
     format: &str,
     music: Option<Vec<u8>>,
+    music_name_json: Option<String>,
     intro: Option<Vec<u8>>,
     on_progress: &js_sys::Function,
 ) -> Result<TrackResult, JsError> {
     let params = parse_params(params_json)?;
     let format = parse_format(format)?;
+    let music_name: MusicName = match music_name_json.as_deref() {
+        Some(json) => {
+            serde_json::from_str(json).map_err(|e| JsError::new(&format!("잘못된 곡 정보: {e}")))?
+        }
+        None => MusicName::default(),
+    };
     let inputs = TrackInputs {
         music: music.as_deref(),
         intro: intro.as_deref(),
@@ -94,7 +117,11 @@ pub fn build_track(
 
     Ok(TrackResult {
         bytes: output.bytes,
-        file_name: beep_core::default_file_name(&params, format, music.is_some()),
+        file_name: beep_core::output_file_name(
+            &params,
+            format,
+            music.is_some().then_some(&music_name),
+        ),
         music_report_json: output
             .music
             .as_ref()

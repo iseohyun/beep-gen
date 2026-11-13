@@ -1,11 +1,13 @@
 //! 로컬 환경 어댑터.
 //!
-//! 코어가 직접 할 수 없는 일(OS 호출, 네트워크)을 맡는다. CLI·데스크톱 앱·MCP 가 함께 쓴다.
+//! 코어가 직접 할 수 없는 일(OS 호출, 네트워크, 로컬 AI)을 맡는다. CLI·데스크톱 앱·MCP 가 함께 쓴다.
 //! 여기에는 소리를 만드는 계산을 두지 않는다. 가져오기와 OS 호출만 한다.
 //! (규칙: `.agents/rules/project_architecture.md` 2.2절)
 
+pub mod ai;
 pub mod fetch;
 pub mod job;
+pub mod song;
 pub mod tts;
 
 use std::fmt;
