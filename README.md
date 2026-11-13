@@ -84,11 +84,11 @@ target/release/beep-gen --list-voices
 | 폴더 | 내용 |
 | :--- | :--- |
 | `crates/beep-core` | 합성·인코딩 코어 (웹 WASM · 네이티브 공용) |
-| `crates/beep-cli` | 명령줄 도구 `beep-gen` |
+| `crates/beep-cli` | 명령줄 도구 `beep-gen` (`beep-gen mcp` 로 MCP 서버) |
 | `crates/beep-wasm` | 코어의 웹(WASM) 연결부 |
 | `apps/web` | 웹 앱 (TypeScript + Vite, PWA) |
 | `apps/desktop` | 데스크톱 앱 (Tauri, 화면은 `apps/web` 을 그대로 사용) |
-| `crates/beep-native` | 로컬 어댑터: Windows 내장 TTS, URL 다운로드 |
+| `crates/beep-native` | 로컬 어댑터: Windows 내장 TTS, URL 다운로드, 음원 생성 공용 절차 |
 | `xtask` | 빌드 작업 (WASM 바인딩 생성) |
 | `tools/parity_check.py` | Python 구현과 결과를 비교하는 검사 |
 | `tools/check_align.py` | 배경 음악과 비프의 정렬을 측정하는 도구 |
@@ -120,3 +120,30 @@ npm run build       # 설치 파일까지 만들기
 ```
 
 실행에는 WebView2 런타임이 필요합니다(Windows 11에는 기본 포함).
+
+### AI 도구 연동 (MCP)
+
+`beep-gen mcp` 는 [MCP](https://modelcontextprotocol.io) 서버로 동작합니다. Claude 같은 AI 도구에 등록하면 "1.4초 템포로 이 음악에 비프 넣어 줘" 같은 요청을 도구가 직접 처리합니다. 서버를 따로 띄울 필요 없이 이 컴퓨터에서 실행됩니다.
+
+등록 예 (Claude Code):
+
+```bash
+claude mcp add beep-gen -- C:/경로/beep-gen.exe mcp
+```
+
+등록 예 (설정 파일을 쓰는 도구):
+
+```json
+{
+  "mcpServers": {
+    "beep-gen": { "command": "C:/경로/beep-gen.exe", "args": ["mcp"] }
+  }
+}
+```
+
+| 도구 | 하는 일 |
+| :--- | :--- |
+| `create_track` | 음원을 만들어 지정한 경로에 저장합니다. CLI와 같은 설정값에 더해 `output`(절대 경로, 필수), `music`(파일 경로 또는 오디오 파일의 직접 주소), `intro_text`, `voice`, `overwrite` 를 받습니다. |
+| `list_voices` | 안내 음성에 쓸 수 있는 목소리 목록을 돌려줍니다. |
+
+이미 있는 파일은 `overwrite` 를 `true` 로 주지 않으면 덮어쓰지 않습니다.

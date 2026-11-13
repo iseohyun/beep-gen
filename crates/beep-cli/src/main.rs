@@ -1,23 +1,41 @@
 //! beep-gen 명령줄 도구.
 //!
-//! 여기는 "로컬 어댑터" 다: 옵션을 읽고, 파일을 읽고, 코어를 부르고, 파일로 저장한다.
+//! 여기는 "로컬 어댑터" 다: 옵션을 읽고, 공용 절차(`beep_native::job`)를 부르고, 파일로 저장한다.
 //! 소리를 만드는 계산은 하나도 하지 않는다.
+//!
+//!   beep-gen [옵션]      음원을 만든다
+//!   beep-gen mcp         MCP 서버로 실행한다 (AI 도구 연동)
+
+mod mcp;
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use beep_core::{
-    DEFAULT_INTRO_TEMPLATE, MusicReport, OutputFormat, Progress, TrackInputs, TrackParams,
-    build_track, default_file_name, intro_text,
-};
-use beep_native::{fetch, tts};
-use clap::Parser;
+use beep_core::{DEFAULT_INTRO_TEMPLATE, MusicReport, OutputFormat, TrackParams};
+use beep_native::job::{self, IntroRequest, JobError, JobRequest, MusicSource};
+use beep_native::tts;
+use clap::{Args, Parser, Subcommand};
 
 /// 맞춤형 비프음 오디오 파일 생성기
 #[derive(Parser, Debug)]
-#[command(name = "beep-gen", version)]
+#[command(name = "beep-gen", version, args_conflicts_with_subcommands = true)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    #[command(flatten)]
+    generate: GenerateArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// MCP 서버로 실행한다. AI 도구가 표준 입출력으로 이 프로그램을 부를 수 있다.
+    Mcp,
+}
+
+#[derive(Args, Debug)]
+struct GenerateArgs {
     #[command(flatten)]
     params: TrackParams,
 
@@ -53,7 +71,13 @@ struct Cli {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(cli) {
+    let result = match cli.command {
+        Some(Command::Mcp) => {
+            mcp::serve_stdio().map_err(|e| io_failure(format!("MCP 서버가 중단되었습니다: {e}")))
+        }
+        None => generate(cli.generate),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(Failure { message, code }) => {
             eprintln!("오류: {message}");
@@ -67,109 +91,71 @@ struct Failure {
     code: u8,
 }
 
-/// 입출력 실패(파일, 네트워크).
+/// 입출력 실패(파일, 네트워크). 종료 코드 1.
 fn io_failure(message: String) -> Failure {
     Failure { message, code: 1 }
 }
 
-fn run(cli: Cli) -> Result<(), Failure> {
-    if cli.list_voices {
+fn generate(args: GenerateArgs) -> Result<(), Failure> {
+    if args.list_voices {
         return list_voices();
     }
 
-    let format = cli
+    let format = args
         .format
         .or_else(|| {
-            cli.output
+            args.output
                 .as_ref()
                 .and_then(|p| p.extension())
                 .and_then(|e| e.to_str())
                 .and_then(OutputFormat::from_extension)
         })
         .unwrap_or_default();
+    let request = JobRequest {
+        params: args.params,
+        format,
+        music: args.music.as_deref().map(MusicSource::parse),
+        intro: Some(IntroRequest {
+            template: args.tts,
+            voice: args.tts_voice,
+        }),
+    };
 
-    let music = cli.music.as_deref().map(load_music).transpose()?;
-    let intro = make_intro(&cli);
-    let output = cli
-        .output
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(default_file_name(&cli.params, format, music.is_some())));
-
-    let quiet = cli.quiet;
+    let quiet = args.quiet;
     let mut last = None;
-    let on_progress = |p: Progress| {
-        if !quiet && last != Some(p) {
-            last = Some(p);
-            eprint!("\r{}... {:3}%   ", p.stage.label(), p.percent);
+    let result = job::run(&request, |percent, stage| {
+        if !quiet && last != Some((percent, stage.to_owned())) {
+            last = Some((percent, stage.to_owned()));
+            eprint!("\r{stage}... {percent:3}%   ");
             let _ = std::io::stderr().flush();
         }
-    };
-
-    let inputs = TrackInputs {
-        music: music.as_deref(),
-        intro: intro.as_deref(),
-    };
-    let track = build_track(&cli.params, format, inputs, on_progress).map_err(|e| {
-        if !quiet {
-            eprintln!();
-        }
-        // 잘못된 설정값·읽을 수 없는 음악 등 입력 문제.
-        Failure {
-            message: e.to_string(),
-            code: 2,
-        }
-    })?;
+    });
     if !quiet {
         eprintln!();
-        if let Some(report) = &track.music {
+    }
+    let track = result.map_err(|e| match e {
+        // 잘못된 설정값·읽을 수 없는 음악 등 입력 문제는 종료 코드 2.
+        JobError::Input(message) => Failure { message, code: 2 },
+        JobError::Fetch(message) => io_failure(message),
+    })?;
+
+    // 음원은 만들었지만 알아야 할 일(예: 안내 음성을 넣지 못함)은 조용한 모드에서도 알린다.
+    for notice in &track.notices {
+        eprintln!("주의: {notice}");
+    }
+    if !quiet {
+        if let Some(report) = &track.music_report {
             print_music_report(report);
         }
     }
 
+    let output = args
+        .output
+        .unwrap_or_else(|| PathBuf::from(&track.file_name));
     std::fs::write(&output, &track.bytes)
         .map_err(|e| io_failure(format!("{} 에 저장하지 못했습니다: {e}", output.display())))?;
     println!("{}", output.display());
     Ok(())
-}
-
-/// 배경 음악을 파일 또는 주소에서 읽는다.
-fn load_music(source: &str) -> Result<Vec<u8>, Failure> {
-    if fetch::is_url(source) {
-        fetch::download(source).map_err(|e| io_failure(e.to_string()))
-    } else {
-        std::fs::read(source)
-            .map_err(|e| io_failure(format!("{source} 을(를) 읽지 못했습니다: {e}")))
-    }
-}
-
-/// 안내 음성을 만든다. 만들 수 없으면 이유를 알리고 안내 없이 계속한다.
-fn make_intro(cli: &Cli) -> Option<Vec<u8>> {
-    let text = intro_text(&cli.tts, &cli.params);
-    if text.is_empty() {
-        return None;
-    }
-    let result = resolve_voice(cli.tts_voice.as_deref())
-        .and_then(|voice| tts::synthesize(&text, voice.as_deref()));
-    match result {
-        Ok(wav) => Some(wav),
-        Err(e) => {
-            eprintln!("주의: 안내 음성 없이 만듭니다. {e}");
-            None
-        }
-    }
-}
-
-/// 사용자가 적은 이름(일부)이나 식별자로 음성을 찾는다.
-fn resolve_voice(wanted: Option<&str>) -> beep_native::Result<Option<String>> {
-    let Some(wanted) = wanted else {
-        return Ok(None);
-    };
-    let needle = wanted.to_lowercase();
-    tts::list_voices()?
-        .into_iter()
-        .find(|v| v.id == wanted || v.name.to_lowercase().contains(&needle))
-        .map(|v| Some(v.id))
-        .ok_or_else(|| beep_native::Error(format!("음성을 찾지 못했습니다: {wanted}")))
 }
 
 fn list_voices() -> Result<(), Failure> {

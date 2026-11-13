@@ -7,6 +7,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+beep-core = { version = "0.1.0", path = "../beep-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 ureq = "3"
 

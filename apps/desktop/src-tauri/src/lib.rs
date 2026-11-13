@@ -1,14 +1,13 @@
 //! Beep Gen 데스크톱 앱의 Rust 쪽.
 //!
-//! 화면(apps/web)이 부르는 명령을 받아 코어와 로컬 어댑터를 연결한다.
-//! 여기에도 소리를 만드는 계산은 없다. 값을 옮기고 순서를 정할 뿐이다.
+//! 화면(apps/web)이 부르는 명령을 받아 공용 절차(`beep_native::job`)로 넘긴다.
+//! 여기에도 소리를 만드는 계산은 없다. 값을 옮길 뿐이다.
 
 use std::sync::Mutex;
 
-use beep_core::{
-    MusicReport, OutputFormat, TrackInputs, TrackParams, build_track, default_file_name, intro_text,
-};
-use beep_native::{fetch, tts};
+use beep_core::{MusicReport, OutputFormat, TrackParams};
+use beep_native::job::{self, IntroRequest, JobRequest};
+use beep_native::tts;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
 use tauri::{Manager, State};
@@ -29,7 +28,7 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// 화면 구성 정보(JSON). 웹의 `describe()` 와 같은 내용이다.
+/// 화면 구성 정보. 웹의 `describe()` 와 같은 내용이다.
 #[tauri::command]
 fn describe() -> beep_core::AppInfo {
     beep_core::describe()
@@ -62,7 +61,7 @@ enum MusicSource {
 }
 
 #[derive(Debug, Deserialize)]
-struct IntroRequest {
+struct IntroOptions {
     template: String,
     #[serde(default, rename = "voiceId")]
     voice_id: Option<String>,
@@ -74,13 +73,13 @@ struct GenerateRequest {
     params_json: String,
     format: String,
     music: Option<MusicSource>,
-    intro: Option<IntroRequest>,
+    intro: Option<IntroOptions>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ProgressEvent {
     percent: u8,
-    stage: &'static str,
+    stage: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,61 +114,40 @@ fn generate_blocking(
         serde_json::from_str(&request.params_json).map_err(|e| format!("잘못된 설정값: {e}"))?;
     let format = OutputFormat::from_extension(&request.format)
         .ok_or_else(|| format!("지원하지 않는 형식: {}", request.format))?;
-    let mut notices = Vec::new();
 
-    let music = match &request.music {
+    let music = match request.music {
         None => None,
-        Some(MusicSource::Upload) => Some(
+        Some(MusicSource::Url { url }) => Some(job::MusicSource::Url(url)),
+        Some(MusicSource::Upload) => Some(job::MusicSource::Bytes(
             lock(&state.uploaded_music)
                 .clone()
                 .ok_or("음악 파일이 전달되지 않았습니다.")?,
-        ),
-        Some(MusicSource::Url { url }) => {
-            let _ = on_progress.send(ProgressEvent {
-                percent: 0,
-                stage: "음악을 내려받는 중",
-            });
-            Some(fetch::download(url).map_err(|e| e.to_string())?)
-        }
+        )),
+    };
+    let job_request = JobRequest {
+        params,
+        format,
+        music,
+        intro: request.intro.map(|intro| IntroRequest {
+            template: intro.template,
+            voice: intro.voice_id,
+        }),
     };
 
-    // 안내 음성을 만들지 못해도 음원은 만든다. 대신 그 사실을 알린다.
-    let intro = request.intro.as_ref().and_then(|intro| {
-        let text = intro_text(&intro.template, &params);
-        if text.is_empty() {
-            return None;
-        }
-        match tts::synthesize(&text, intro.voice_id.as_deref()) {
-            Ok(wav) => Some(wav),
-            Err(e) => {
-                notices.push(format!("안내 음성 없이 만들었습니다. {e}"));
-                None
-            }
-        }
-    });
-
-    let inputs = TrackInputs {
-        music: music.as_deref(),
-        intro: intro.as_deref(),
-    };
-    let mut last = None;
-    let output = build_track(&params, format, inputs, |progress| {
-        if last != Some(progress) {
-            last = Some(progress);
-            // 화면이 닫히는 중이면 보내지 못할 수 있다. 음원 생성과는 무관하다.
-            let _ = on_progress.send(ProgressEvent {
-                percent: progress.percent,
-                stage: progress.stage.label(),
-            });
-        }
+    let output = job::run(&job_request, |percent, stage| {
+        // 화면이 닫히는 중이면 보내지 못할 수 있다. 음원 생성과는 무관하다.
+        let _ = on_progress.send(ProgressEvent {
+            percent,
+            stage: stage.to_owned(),
+        });
     })
     .map_err(|e| e.to_string())?;
 
     *lock(&state.result) = Some(output.bytes);
     Ok(GenerateResponse {
-        file_name: default_file_name(&params, format, music.is_some()),
-        music_report: output.music,
-        notices,
+        file_name: output.file_name,
+        music_report: output.music_report,
+        notices: output.notices,
     })
 }
 

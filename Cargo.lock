@@ -157,6 +157,7 @@ dependencies = [
  "beep-core",
  "beep-native",
  "clap",
+ "serde_json",
 ]
 
 [[package]]
@@ -189,6 +190,7 @@ dependencies = [
 name = "beep-native"
 version = "0.1.0"
 dependencies = [
+ "beep-core",
  "serde",
  "ureq",
  "windows",
