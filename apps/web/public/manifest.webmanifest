@@ -1,0 +1,16 @@
+{
+  "name": "Beep Gen · 맞춤형 비프음 생성기",
+  "short_name": "Beep Gen",
+  "description": "원하는 주기와 박자 분할로 비프음 오디오 파일을 만드는 도구",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1623",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="원하는 주기와 박자 분할로 비프음 오디오 파일을 만드는 도구" />
+    <meta name="theme-color" content="#2563eb" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <title>Beep Gen · 맞춤형 비프음 생성기</title>
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <h1>Beep Gen</h1>
+        <p class="tagline">원하는 주기와 박자로 비프음 파일을 만듭니다. 모든 처리는 이 기기 안에서 이루어집니다.</p>
+      </header>
+
+      <form id="settings" class="card">
+        <div id="basic-fields" class="fields"></div>
+
+        <div class="field">
+          <label for="format">파일 형식</label>
+          <div class="field-control">
+            <select id="format"></select>
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>고급 설정</summary>
+          <div id="advanced-fields" class="fields"></div>
+        </details>
+
+        <p id="tts-note" class="note" hidden></p>
+
+        <div class="actions">
+          <button id="generate" type="submit" class="primary" disabled>음원 만들기</button>
+          <button id="reset" type="button">기본값으로</button>
+        </div>
+
+        <progress id="progress" max="100" value="0" hidden></progress>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </form>
+
+      <section id="result" class="card result" hidden>
+        <h2>결과</h2>
+        <p id="result-name" class="result-name"></p>
+        <audio id="player" controls preload="metadata"></audio>
+        <div class="actions">
+          <button id="download" type="button" class="primary">파일 저장</button>
+        </div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="version"></span>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

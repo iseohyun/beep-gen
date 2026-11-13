@@ -11,7 +11,7 @@ pub mod synth;
 
 pub use encode::OutputFormat;
 pub use error::{Error, Result};
-pub use params::TrackParams;
+pub use params::{ParamKind, ParamSpec, TrackParams, param_specs};
 
 use encode::Encoder;
 use synth::BeepSequence;

@@ -73,7 +73,21 @@ target/release/beep-gen -n 1.4 -m 2 -l 60 -o my_beat.mp3
 | :--- | :--- |
 | `crates/beep-core` | 합성·인코딩 코어 (웹 WASM · 네이티브 공용) |
 | `crates/beep-cli` | 명령줄 도구 `beep-gen` |
+| `crates/beep-wasm` | 코어의 웹(WASM) 연결부 |
+| `apps/web` | 웹 앱 (TypeScript + Vite, PWA) |
+| `xtask` | 빌드 작업 (WASM 바인딩 생성) |
 | `tools/parity_check.py` | Python 구현과 결과를 비교하는 검사 |
 | `spike/` | 템포 변환 사전 검증 코드 (제품 코드 아님) |
+
+### 웹 앱
+
+브라우저 안에서 같은 코어(WASM)로 음원을 만듭니다. 서버로 아무것도 보내지 않으며, 한 번 연 뒤에는 오프라인에서도 동작합니다.
+
+```bash
+cd apps/web
+npm install
+npm run build      # 결과물: 저장소 루트의 dist/
+npm run preview    # http://localhost:4173 에서 확인
+```
 
 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-o`, `--format`), `--tts` 는 아직 없습니다. `-n` 은 소수(예: 1.4)를 받습니다.

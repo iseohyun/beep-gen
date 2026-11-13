@@ -33,7 +33,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: 테스트
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
 
       # 코어에 플랫폼 전용 코드(파일·네트워크·OS 호출, C 의존성)가 섞이면 여기서 실패한다.
       - name: 코어 WASM 빌드
@@ -49,3 +49,26 @@ jobs:
       # 기존 Python 구현과 비프 합성 결과가 같은지 확인한다.
       - name: Python 구현과 결과 비교
         run: python tools/parity_check.py target/release/beep-gen
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust 도구 준비
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # WASM 생성 → 타입 검사 → 번들. 버전 파일과 Cargo 버전이 다르면 여기서 실패한다.
+      - name: 웹 앱 빌드
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build

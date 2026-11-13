@@ -18,6 +18,25 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    /// 지원하는 모든 형식. 첫 번째가 기본값이다.
+    pub const ALL: [OutputFormat; 2] = [OutputFormat::Mp3, OutputFormat::Wav];
+
+    /// 화면에 보일 이름.
+    pub fn label(self) -> &'static str {
+        match self {
+            OutputFormat::Mp3 => "MP3",
+            OutputFormat::Wav => "WAV (무손실)",
+        }
+    }
+
+    /// 파일의 MIME 형식.
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            OutputFormat::Mp3 => "audio/mpeg",
+            OutputFormat::Wav => "audio/wav",
+        }
+    }
+
     /// 파일 확장자(점 제외).
     pub fn extension(self) -> &'static str {
         match self {

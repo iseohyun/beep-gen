@@ -36,6 +36,17 @@
   - 정식 버전(SemVer): 사용자 승인 후에만 올린다.
 - **호스팅**: GitHub Pages만 사용한다. 서버를 두지 않으며 모든 처리는 브라우저 안에서 한다.
 
+### 3.1 웹 UI 구조와 빌드 (2026-11-13 구현)
+- **위치**: 화면 코드는 `apps/web/`, 빌드 결과물은 저장소 루트 `dist/` (git 제외). `C:\git\open-test-server.bat` 가 `dist/index.html` 을 찾기 때문이다.
+- **빌드 명령**: `apps/web` 에서 `npm.cmd run build` (WASM 생성 → 타입 검사 → 번들). 커밋 전 이 명령과 `cargo test --workspace --all-features` 가 모두 통과해야 한다.
+- **경로는 상대 경로**: `vite.config.ts` 의 `base: "./"`. GitHub Pages(`/beep-gen/`)와 로컬 테스트 서버(`/beep-gen/`, `/beep-gen@브랜치/`)에서 같은 결과물이 동작해야 한다. 절대 경로(`/assets/...`)를 쓰지 않는다.
+- **프레임워크 없음**: TypeScript + Vite 만 쓴다. 화면이 여러 개로 늘어나면 그때 사용자와 상의한다.
+- **입력 폼은 코어의 명세로 생성**: 파라미터별 화면 코드를 따로 쓰지 않는다. 코어의 `param_specs()` 가 이름·기본값·범위를 알려주고 `main.ts` 가 그대로 그린다.
+- **플랫폼 인터페이스**: 화면은 `src/platform.ts` 의 `Platform` 만 호출한다. 웹 구현은 `platform-web.ts`(워커 + WASM). 로컬앱은 같은 인터페이스의 다른 구현을 추가한다.
+- **WASM 바인딩 생성**: `cargo run -p xtask -- wasm`. `crates/beep-wasm` 의 `wasm-bindgen` 과 `xtask` 의 `wasm-bindgen-cli-support` 는 반드시 같은 버전으로 고정한다. 생성물 `apps/web/src/wasm/` 은 git 에 올리지 않는다.
+- **버전 파일**: `apps/web/src/version.ts`. `BUILD_TAG` 는 서비스 워커의 캐시 이름이며, `APP_VERSION` 이 Cargo 작업 공간 버전과 다르면 빌드가 실패한다.
+- **PWA**: `public/sw.js` 가 빌드 때 만들어지는 `precache.json` 의 파일을 미리 캐시한다. `dist/` 를 통째로 비우지 않는다(`BeepGen.exe` 가 함께 있을 수 있음).
+
 ## 4. TTS 정책 (2026-11-13 사용자 확정)
 - **로컬앱**: OS 내장 TTS 및 기존 엔진을 어댑터로 제공한다.
 - **웹**: 기본은 TTS 비활성 + 로컬앱 안내. 추가로, 원하는 사용자가 브라우저 내장 TTS 모델을 내려받아 쓸 수 있는 선택지를 제공한다(한국어 품질·용량은 구현 단계에서 검증).
