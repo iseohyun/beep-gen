@@ -11,10 +11,14 @@ import type {
   Capabilities,
   GenerateRequest,
   GeneratedTrack,
+  LevelGuide,
   MusicReport,
   MusicSource,
   Platform,
   ProgressInfo,
+  SaveTarget,
+  UpdateInfo,
+  SongDetails,
   SongGuess,
   TtsSetup,
   Voice,
@@ -41,6 +45,9 @@ export class DesktopPlatform implements Platform {
     musicUrl: true,
     ttsIntro: true,
     offlineCache: false,
+    songTags: true,
+    saveFolders: true,
+    updates: true,
   };
 
   private info?: AppInfo;
@@ -78,6 +85,8 @@ export class DesktopPlatform implements Platform {
     music: MusicSource,
   ): Promise<{ kind: "upload"; name: string } | { kind: "url"; url: string }> {
     if (music.kind === "url") return music;
+    // 파일 고르기 창으로 고른 파일은 앱이 이미 읽어 두었다.
+    if (music.kind === "local") return { kind: "upload", name: music.name };
     if (this.uploaded !== music.file) {
       this.uploaded = undefined;
       await call("set_music", new Uint8Array(await music.file.arrayBuffer()));
@@ -86,9 +95,40 @@ export class DesktopPlatform implements Platform {
     return { kind: "upload", name: music.name };
   }
 
+  async pickMusic(): Promise<MusicSource | null> {
+    const picked = await call<{ name: string; path: string } | null>("pick_music");
+    if (!picked) return null;
+    // 앱이 가진 음악이 바뀌었으므로, 예전에 보낸 파일은 다시 보내야 한다.
+    this.uploaded = undefined;
+    return { kind: "local", ...picked };
+  }
+
+  async saveSongInfo(info: SongDetails, rename: boolean): Promise<MusicSource> {
+    const saved = await call<{ name: string; path: string }>("save_song_info", {
+      info: {
+        title: info.title || null,
+        artist: info.artist || null,
+        composer: info.composer || null,
+        source_url: info.sourceUrl || null,
+        ai_generated: info.aiGenerated,
+        meter: info.meter,
+        bpm: info.bpm,
+      },
+      rename,
+    });
+    return { kind: "local", ...saved };
+  }
+
   // 파일의 태그 → 파일 이름 → 로컬 AI(Ollama) 순서로 찾는다.
   async identifyMusic(music: MusicSource): Promise<SongGuess> {
     return call<SongGuess>("identify_music", { source: await this.toAppSource(music) });
+  }
+
+  // 주소로 넣은 음악은 아직 내려받기 전이라 잴 수 없다.
+  async musicLevels(music: MusicSource): Promise<LevelGuide | null> {
+    if (music.kind === "url") return null;
+    await this.toAppSource(music);
+    return call<LevelGuide>("music_levels");
   }
 
   async generate(
@@ -110,11 +150,15 @@ export class DesktopPlatform implements Platform {
           title: request.song.title || null,
         },
         intro: request.intro,
+        preview: request.preview ?? null,
+        nameFormat: request.nameFormat ?? null,
       },
       onProgress: channel,
     });
 
-    const bytes = new Uint8Array(await call<ArrayBuffer>("result_bytes"));
+    const bytes = new Uint8Array(
+      await call<ArrayBuffer>("result_bytes", { preview: request.preview !== undefined }),
+    );
     const mime =
       info.formats.find((f) => f.id === request.format)?.mime ?? "application/octet-stream";
     return {
@@ -134,6 +178,39 @@ export class DesktopPlatform implements Platform {
     });
     if (!path) return false;
     await call("save_result", { path });
+    this.savedPath = path;
     return true;
+  }
+
+  setTitle(title: string): void {
+    document.title = title;
+    // 제목을 바꾸지 못해도 앱을 쓰는 데는 지장이 없다.
+    void call("set_title", { title }).catch(() => {});
+  }
+
+  pickFolder(): Promise<string | null> {
+    return call<string | null>("pick_folder");
+  }
+
+  async saveTo(track: GeneratedTrack, target: SaveTarget): Promise<string | null> {
+    const path = await call<string | null>("save_result_to", { target, fileName: track.fileName });
+    if (path) this.savedPath = path;
+    return path;
+  }
+
+  checkUpdate(): Promise<UpdateInfo | null> {
+    return call<UpdateInfo | null>("check_update");
+  }
+
+  async applyUpdate(): Promise<void> {
+    await call("apply_update");
+  }
+
+  /** 마지막으로 저장한 파일의 위치. */
+  private savedPath: string | null = null;
+
+  async showSavedFolder(): Promise<void> {
+    if (!this.savedPath) throw new Error("아직 저장한 파일이 없습니다.");
+    await call("show_in_folder", { path: this.savedPath });
   }
 }

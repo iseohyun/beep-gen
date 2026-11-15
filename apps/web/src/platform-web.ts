@@ -8,6 +8,7 @@ import type {
   Capabilities,
   GenerateRequest,
   GeneratedTrack,
+  LevelGuide,
   MusicReport,
   MusicSource,
   Platform,
@@ -53,6 +54,10 @@ export class WebPlatform implements Platform {
     // 브라우저는 내장 음성을 파일로 받을 수 없어, 음성 모델을 내려받아 직접 합성한다.
     ttsIntro: canRunTts(),
     offlineCache: true,
+    // 브라우저는 사용자의 원본 파일을 고칠 수 없다.
+    songTags: false,
+    saveFolders: false,
+    updates: false,
   };
 
   private readonly worker: Worker;
@@ -203,7 +208,7 @@ export class WebPlatform implements Platform {
 
   // 웹에서는 파일의 태그와 파일 이름만 본다(로컬 AI 는 로컬앱에서만 쓴다).
   async identifyMusic(music: MusicSource): Promise<SongGuess> {
-    if (music.kind === "url") return { artist: null, title: null, by: null };
+    if (music.kind !== "file") return { artist: null, title: null, by: null };
     const buffer = await music.file.arrayBuffer();
     const response = await this.request(
       { type: "identify", music: buffer, sourceName: music.name },
@@ -213,19 +218,39 @@ export class WebPlatform implements Platform {
     return JSON.parse(response.guessJson) as SongGuess;
   }
 
+  async pickMusic(): Promise<MusicSource | null> {
+    return null;
+  }
+
+  async saveSongInfo(): Promise<MusicSource> {
+    // 브라우저는 원본 파일의 위치를 모른다.
+    throw new Error("이 환경에서는 음악 파일에 정보를 저장할 수 없습니다.");
+  }
+
+  async musicLevels(music: MusicSource): Promise<LevelGuide | null> {
+    if (music.kind !== "file") return null;
+    const buffer = await music.file.arrayBuffer();
+    const response = await this.request({ type: "levels", music: buffer }, [buffer]);
+    if (response.type !== "levels") throw new Error("예상하지 못한 응답입니다.");
+    return JSON.parse(response.guideJson) as LevelGuide;
+  }
+
   // ── 음원 생성 ───────────────────────────────────────────
 
   async generate(
     request: GenerateRequest,
     onProgress: (progress: ProgressInfo) => void,
   ): Promise<GeneratedTrack> {
-    if (request.music?.kind === "url") {
-      throw new Error("이 환경에서는 주소로 음악을 가져올 수 없습니다.");
+    if (request.music && request.music.kind !== "file") {
+      throw new Error("이 환경에서는 고른 파일의 내용으로만 음악을 넣을 수 있습니다.");
     }
     const info = await this.describe();
     const paramsJson = JSON.stringify(request.params);
     const notices: string[] = [];
-    const introBuffer = await this.makeIntro(request, paramsJson, notices, onProgress);
+    // 미리듣기에는 안내 음성을 넣지 않는다.
+    const introBuffer = request.preview
+      ? null
+      : await this.makeIntro(request, paramsJson, notices, onProgress);
 
     // 파일 내용은 만들 때마다 새로 읽어 워커로 넘긴다(복사 없이 소유권 이전).
     const musicBuffer = request.music ? await request.music.file.arrayBuffer() : null;
@@ -236,9 +261,13 @@ export class WebPlatform implements Platform {
         paramsJson,
         format: request.format,
         music: musicBuffer,
-        musicNameJson: request.music
-          ? JSON.stringify({ song: request.song, source_name: request.music.name })
-          : null,
+        optionsJson: JSON.stringify({
+          music_name: request.music
+            ? { song: request.song, source_name: request.music.name }
+            : undefined,
+          preview: request.preview,
+          name_format: request.nameFormat,
+        }),
         intro: introBuffer,
       },
       transfer,
@@ -269,5 +298,31 @@ export class WebPlatform implements Platform {
     // 다운로드가 시작될 시간을 준 뒤 임시 주소를 해제한다.
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
     return true;
+  }
+
+  setTitle(title: string): void {
+    document.title = title;
+  }
+
+  // 브라우저는 폴더를 정해 두고 저장할 수 없다. 내려받기(`save`)를 쓴다.
+  async pickFolder(): Promise<string | null> {
+    return null;
+  }
+
+  async saveTo(): Promise<string | null> {
+    throw new Error("이 환경에서는 폴더를 정해 저장할 수 없습니다.");
+  }
+
+  async showSavedFolder(): Promise<void> {
+    throw new Error("이 환경에서는 폴더를 열 수 없습니다.");
+  }
+
+  // 웹은 서비스 워커가 새 빌드를 알아서 받아 온다(빌드 태그).
+  async checkUpdate(): Promise<null> {
+    return null;
+  }
+
+  async applyUpdate(): Promise<void> {
+    throw new Error("이 환경에서는 업데이트 버튼을 쓰지 않습니다.");
   }
 }

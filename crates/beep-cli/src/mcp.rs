@@ -14,7 +14,7 @@ use beep_core::{
     DEFAULT_INTRO_TEMPLATE, OutputFormat, ParamKind, SongInfo, TrackParams, param_specs,
 };
 use beep_native::job::{self, IntroRequest, JobRequest, MusicSource, SongLookup};
-use beep_native::{fetch, tts};
+use beep_native::{fetch, tags, tts};
 use serde_json::{Map, Value, json};
 
 /// 이 서버가 아는 프로토콜 버전(최신이 앞).
@@ -23,6 +23,7 @@ const SERVER_NAME: &str = "beep-gen";
 
 const TOOL_CREATE: &str = "create_track";
 const TOOL_VOICES: &str = "list_voices";
+const TOOL_SONG_INFO: &str = "save_song_info";
 
 // JSON-RPC 오류 코드
 const PARSE_ERROR: i64 = -32700;
@@ -169,6 +170,14 @@ fn tools() -> Value {
         }),
     );
     properties.insert(
+        "name_format".into(),
+        json!({
+            "type": "string",
+            "description": "output 이 폴더일 때 짓는 파일 이름의 형식. {n} 은 주기(초), {가수} 와 {곡} 은 가수와 곡 제목으로 바뀝니다. 예: \"{곡} {n}초\"",
+            "default": beep_core::DEFAULT_NAME_FORMAT,
+        }),
+    );
+    properties.insert(
         "artist".into(),
         json!({
             "type": "string",
@@ -248,6 +257,31 @@ fn tools() -> Value {
             "description": "안내 음성(TTS)에 쓸 수 있는, 이 컴퓨터에 설치된 목소리 목록을 돌려줍니다.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
         },
+        {
+            "name": TOOL_SONG_INFO,
+            "description": "음악 파일에 곡 정보(곡 제목·가수·작곡자·출처 링크·AI 활용 여부)를 적어 두고, 파일 이름을 \"가수 - 곡\" 으로 바꿉니다. \
+    한 번 적어 두면 다음부터 그 파일의 가수와 곡을 다시 찾지 않아도 됩니다. 원래 파일 이름은 파일 안에 남깁니다. \
+    적을 값을 하나도 주지 않으면 지금 적혀 있는 정보를 돌려줍니다. 같은 이름의 다른 파일이 이미 있으면 바꾸지 않고 실패합니다. \
+    확인되지 않은 정보를 지어내서 넣지 마세요.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "음악 파일의 절대 경로." },
+                    "title": { "type": "string", "description": "곡 제목." },
+                    "artist": { "type": "string", "description": "가수(또는 만든 사람)." },
+                    "composer": { "type": "string", "description": "작곡자." },
+                    "link": { "type": "string", "description": "곡을 받은 곳의 주소(예: 동영상 주소)." },
+                    "ai_generated": { "type": "boolean", "description": "AI 로 만든 곡인지." },
+                    "meter": { "type": "integer", "enum": [2, 3],
+                               "description": "박자 계열: 2 = 2박 계열(2/4, 4/4), 3 = 3박 계열(3/4, 6/8)." },
+                    "bpm": { "type": "number", "description": "템포(BPM). 3박 계열은 강세(맥박 세 개)의 빠르기." },
+                    "rename": { "type": "boolean", "default": true,
+                                "description": "파일 이름을 \"가수 - 곡\" 으로 바꿀지." },
+                },
+                "required": ["path"],
+                "additionalProperties": false,
+            },
+        },
     ])
 }
 
@@ -275,6 +309,10 @@ fn call_tool(params: &Value, writer: &mut impl Write) -> io::Result<RpcResult> {
 
     Ok(match name {
         TOOL_VOICES => Ok(list_voices()),
+        TOOL_SONG_INFO => Ok(match save_song_info(arguments) {
+            Ok(summary) => tool_text(summary, false),
+            Err(message) => tool_text(message, true),
+        }),
         TOOL_CREATE => {
             let mut write_error = None;
             let outcome = create_track(arguments, |percent, stage| {
@@ -322,6 +360,54 @@ fn list_voices() -> Value {
     }
 }
 
+/// 음악 파일에 곡 정보를 적고(또는 읽고) 결과(JSON 문자열)를 돌려준다.
+fn save_song_info(mut arguments: Map<String, Value>) -> Result<String, String> {
+    let path = take_string(&mut arguments, "path")?
+        .map(PathBuf::from)
+        .ok_or("path(음악 파일의 절대 경로)가 필요합니다")?;
+    if !path.is_absolute() {
+        return Err(format!("path 는 절대 경로여야 합니다: {}", path.display()));
+    }
+    let mut take_bool = |key: &str| match arguments.remove(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(value)),
+        Some(_) => Err(format!("{key} 는 true 또는 false 여야 합니다")),
+    };
+    let ai_generated = take_bool("ai_generated")?;
+    let rename = take_bool("rename")?.unwrap_or(true);
+    let mut take_number = |key: &str| match arguments.remove(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(value)) => Ok(value.as_f64()),
+        Some(_) => Err(format!("{key} 는 숫자여야 합니다")),
+    };
+    let meter = take_number("meter")?.map(|meter| meter as u32);
+    let bpm = take_number("bpm")?;
+    let wanted = tags::SongTags {
+        title: take_string(&mut arguments, "title")?,
+        artist: take_string(&mut arguments, "artist")?,
+        composer: take_string(&mut arguments, "composer")?,
+        source_url: take_string(&mut arguments, "link")?,
+        ai_generated,
+        original_name: None,
+        meter,
+        bpm,
+    }
+    .cleaned();
+    if let Some(unknown) = arguments.keys().next() {
+        return Err(format!("모르는 항목입니다: {unknown}"));
+    }
+
+    let summary = if wanted == tags::SongTags::default() {
+        let found = tags::read(&path).map_err(|e| e.to_string())?;
+        json!({ "path": path.display().to_string(), "renamed": false, "info": found })
+    } else {
+        let saved = tags::save(&path, &wanted, rename).map_err(|e| e.to_string())?;
+        json!({ "path": saved.path.display().to_string(), "renamed": saved.renamed,
+                "info": saved.tags })
+    };
+    Ok(serde_json::to_string_pretty(&summary).unwrap_or_default())
+}
+
 fn take_string(arguments: &mut Map<String, Value>, key: &str) -> Result<Option<String>, String> {
     match arguments.remove(key) {
         None | Some(Value::Null) => Ok(None),
@@ -340,6 +426,7 @@ fn create_track(
     let music = take_string(&mut arguments, "music")?;
     let artist = take_string(&mut arguments, "artist")?;
     let title = take_string(&mut arguments, "title")?;
+    let name_format = take_string(&mut arguments, "name_format")?;
     let intro_text = take_string(&mut arguments, "intro_text")?;
     let voice = take_string(&mut arguments, "voice")?;
     let format_name = take_string(&mut arguments, "format")?;
@@ -393,6 +480,7 @@ fn create_track(
             voice: voice.filter(|v| !v.trim().is_empty()),
         }),
         song: SongInfo::new(artist.as_deref(), title.as_deref()),
+        name_format,
         // 이 도구를 부르는 쪽이 AI 이므로 로컬 AI 에는 묻지 않는다.
         song_lookup: if into_folder {
             SongLookup::Detect
@@ -531,7 +619,7 @@ mod tests {
     fn tool_schema_follows_core_param_specs() {
         let replies = talk(&[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })]);
         let tools = replies[0]["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
         let create = &tools[0];
         assert_eq!(create["name"], TOOL_CREATE);
         let properties = create["inputSchema"]["properties"].as_object().unwrap();
@@ -609,6 +697,61 @@ mod tests {
         // 같은 이름이 이미 있으면 덮어쓰지 않는다.
         let replies = talk(&[call(2, TOOL_CREATE, arguments)]);
         assert_eq!(replies[0]["result"]["isError"], true);
+    }
+
+    #[test]
+    fn song_info_is_saved_and_read_back() {
+        let folder = temp_path("song-info");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let music = folder.join("raw name.mp3");
+        let made = talk(&[call(
+            1,
+            TOOL_CREATE,
+            json!({ "output": music, "length": 1, "intro_text": "" }),
+        )]);
+        assert_eq!(made[0]["result"]["isError"], false, "{}", made[0]);
+
+        let saved = talk(&[call(
+            2,
+            TOOL_SONG_INFO,
+            json!({ "path": music, "title": "Come a Little Closer", "artist": "Foyage",
+                    "link": "https://example.com/v", "ai_generated": true }),
+        )]);
+        let result = &saved[0]["result"];
+        assert_eq!(result["isError"], false, "{result}");
+        let summary: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        let renamed = folder.join("Foyage - Come a Little Closer.mp3");
+        assert_eq!(summary["path"], renamed.display().to_string());
+        assert_eq!(summary["renamed"], true);
+        assert!(renamed.is_file() && !music.exists());
+
+        // 값을 주지 않으면 적혀 있는 정보를 읽어 온다.
+        let read = talk(&[call(3, TOOL_SONG_INFO, json!({ "path": renamed }))]);
+        let summary: Value =
+            serde_json::from_str(read[0]["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(summary["info"]["artist"], "Foyage");
+        assert_eq!(summary["info"]["ai_generated"], true);
+        assert_eq!(summary["info"]["source_url"], "https://example.com/v");
+        assert_eq!(summary["info"]["original_name"], "raw name.mp3");
+
+        for (arguments, expected) in [
+            (json!({ "title": "x" }), "path"),
+            (json!({ "path": "relative.mp3", "title": "x" }), "절대 경로"),
+            (json!({ "path": renamed, "nope": 1 }), "nope"),
+            (
+                json!({ "path": folder.join("missing.mp3"), "title": "x" }),
+                "열지 못했습니다",
+            ),
+        ] {
+            let replies = talk(&[call(9, TOOL_SONG_INFO, arguments.clone())]);
+            let result = &replies[0]["result"];
+            assert_eq!(result["isError"], true, "{arguments}");
+            let text = result["content"][0]["text"].as_str().unwrap();
+            assert!(text.contains(expected), "{arguments} → {text}");
+        }
     }
 
     #[test]

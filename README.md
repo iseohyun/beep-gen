@@ -69,7 +69,10 @@ cargo build --release -p beep-cli
 target/release/beep-gen -n 1.4 -m 2 -l 60 -o my_beat.mp3
 
 # 배경 음악 넣기: 음악을 비프 템포에 맞춰 변환해 함께 넣는다 (길이는 음악을 따름)
-target/release/beep-gen -n 1.4 -m 2 --music song.mp3 --music-volume 70 -o with_music.mp3
+target/release/beep-gen -n 1.4 -m 2 --music song.mp3 -o with_music.mp3
+
+# 만들기 전에 10초만 들어보기 (곡의 30% 지점부터, --preview-from 으로 위치 변경)
+target/release/beep-gen -n 1.4 -m 2 --music song.mp3 --preview -o preview.wav
 
 # 음악을 주소로 가져오기 (오디오 파일의 직접 주소만)
 target/release/beep-gen -n 1.4 -m 2 --music https://example.com/song.mp3
@@ -83,9 +86,23 @@ target/release/beep-gen -n 1.4 --music "IU - Blueming.mp3"
 target/release/beep-gen -n 1.4 --music track07.mp3 --artist 아이유 --title Blueming
 ```
 
+#### 음악 파일에 곡 정보 저장
+
+가수와 곡을 한 번 알아냈으면 음악 파일에 적어 둘 수 있습니다. 그러면 다음부터 다시 찾지 않고, 파일 이름도 `가수 - 곡` 으로 정리됩니다.
+
+```bash
+# 정보를 적고 이름을 "Foyage - Come a Little Closer.mp3" 로 바꾼다
+target/release/beep-gen tag "받은 파일.mp3" --artist Foyage --title "Come a Little Closer" --composer Foyage --link "https://..." --ai yes
+
+# 적혀 있는 정보 보기
+target/release/beep-gen tag "Foyage - Come a Little Closer.mp3"
+```
+
+원래 파일 이름은 파일 안에 남깁니다. 같은 이름의 다른 파일이 이미 있으면 덮어쓰지 않고 그만둡니다. 데스크톱 앱에서는 배경음 구역의 저장 아이콘 버튼으로("파일명 갱신"을 끄면 이름은 그대로 둡니다), AI 도구에서는 MCP의 `save_song_info` 로 같은 일을 합니다. 웹에서는 원본 파일을 고칠 수 없어 제공하지 않습니다.
+
 #### 결과 파일 이름
 
-`-o` 를 주지 않으면 `[{주기}초] {가수} - {곡}.{확장자}` 꼴로 이름을 짓습니다.
+`-o` 를 주지 않으면 `[{주기}초] {가수} - {곡}.{확장자}` 꼴로 이름을 짓습니다. 형식은 `--name-format "{곡} {n}초"` 처럼 바꿀 수 있습니다(화면에서는 목록에서 고르거나 직접 입력).
 
 | 상황 | 이름 |
 | :--- | :--- |
@@ -101,7 +118,7 @@ target/release/beep-gen -n 1.4 --music track07.mp3 --artist 아이유 --title Bl
 3. 이 컴퓨터의 로컬 AI([Ollama](https://ollama.com)) — CLI와 데스크톱 앱에서만. 파일 이름만 보내며, 추정한 결과는 "틀릴 수 있다"고 알립니다. Ollama가 없으면 건너뜁니다. `--no-ai` 로 끌 수 있고, 주소는 `OLLAMA_HOST`, 모델은 `BEEP_GEN_AI_MODEL` 환경 변수로 바꿉니다.
 4. 직접 입력: CLI는 `--artist`·`--title`, 화면에서는 가수·곡 칸
 
-배경 음악은 MP3, WAV, FLAC, OGG, M4A를 받습니다. 음악의 한 박을 비프 간격의 0.5·1·2배 중 가장 가까운 쪽에 맞추며, 박자가 일정한 곡에서 잘 동작합니다. `--beep-volume 0` 으로 템포만 맞춘 음악을 얻을 수 있습니다.
+배경 음악은 MP3, WAV, FLAC, OGG, M4A를 받습니다. 음악의 한 박을 비프 간격의 0.5·1·2배 중 가장 가까운 쪽에 맞춥니다. 3박 계열(3/4, 6/8) 곡은 비프 세 개가 한 마디가 되도록 맞추고, 한 마디의 강약은 `--triple-accent`(0 강약강, 1 강약약)로 고릅니다. 박자 계열을 잘못 읽으면 `--meter 2` 또는 `--meter 3` 으로 정합니다. 템포가 조금씩 흔들리는 곡도 박마다 따라가 끝까지 맞추며, 그만큼 구간에 따라 음높이가 조금 달라질 수 있습니다. 음악은 가장 큰 순간이 최대 크기가 되도록 자동으로 맞춥니다. 기본 음량은 비프 30%, 음악 100%이고(화면에서는 dB 슬라이더, 초기값은 곡의 평균 크기) `--beep-volume`, `--music-volume` 으로 바꿉니다. `--beep-volume 0` 으로 템포만 맞춘 음악을 얻을 수 있습니다.
 
 | 폴더 | 내용 |
 | :--- | :--- |
@@ -128,7 +145,7 @@ npm run build      # 결과물: 저장소 루트의 dist/
 npm run preview    # http://localhost:4173 에서 확인
 ```
 
-기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-t`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume`, `--tts-voice`, `--list-voices`, `--artist`, `--title`, `--no-ai` 가 추가되었습니다. `-o` 를 생략했을 때의 파일 이름은 Python 버전과 다릅니다(위의 "결과 파일 이름" 참고).
+기본 옵션은 Python 버전과 같고(`-n`, `-m`, `-v`, `-l`, `-t`, `-o`, `--format`), `--music`, `--beep-volume`, `--music-volume`, `--tts-voice`, `--list-voices`, `--artist`, `--title`, `--no-ai`, `--preview`, `--preview-from`, `--name-format` 과 `tag` 명령이 추가되었습니다. `-o` 를 생략했을 때의 파일 이름은 Python 버전과 다릅니다(위의 "결과 파일 이름" 참고).
 
 - **안내 음성(TTS)** 은 Windows 내장 음성으로 만듭니다(인터넷 불필요). 다른 운영체제에서는 안내 음성 없이 만들어집니다.
 - **음악 주소** 는 오디오 파일을 바로 내려받을 수 있는 주소만 받습니다. YouTube 등 스트리밍 서비스 주소는 저작권 문제로 지원하지 않습니다. 필요하다면 이 프로젝트를 포크(fork)해 직접 기능을 추가해 사용하시기 바랍니다. `-n` 은 소수(예: 1.4)를 받습니다.
@@ -169,5 +186,6 @@ claude mcp add beep-gen -- C:/경로/beep-gen.exe mcp
 | :--- | :--- |
 | `create_track` | 음원을 만들어 지정한 경로에 저장합니다. CLI와 같은 설정값에 더해 `output`(절대 경로, 필수), `music`(파일 경로 또는 오디오 파일의 직접 주소), `artist`, `title`, `intro_text`, `voice`, `overwrite` 를 받습니다. `output` 에 폴더를 주면 `[1.4초] 가수 - 곡.mp3` 꼴로 이름을 자동으로 짓습니다. |
 | `list_voices` | 안내 음성에 쓸 수 있는 목소리 목록을 돌려줍니다. |
+| `save_song_info` | 음악 파일에 곡 정보(곡 제목·가수·작곡자·링크·AI 활용 여부)를 적고 이름을 `가수 - 곡` 으로 바꿉니다. 값을 주지 않으면 적혀 있는 정보를 돌려줍니다. |
 
 이미 있는 파일은 `overwrite` 를 `true` 로 주지 않으면 덮어쓰지 않습니다.

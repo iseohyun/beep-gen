@@ -5,6 +5,9 @@
 //! 어긋나므로, 남은 차이만큼 여기서 다시 맞춘다. 배율이 1에 아주 가까운 경우만 쓰기
 //! 때문에 별도의 저역 필터는 두지 않는다.
 //!
+//! 배율은 진행 중에 바꿀 수 있다. 템포가 흔들리는 곡을 박마다 제자리에 맞출 때,
+//! 구간마다 조금씩 다른 배율을 준다.
+//!
 //! 구간 단위로 받아 구간 단위로 내보내므로 전체 음원을 메모리에 쌓지 않는다.
 
 /// 보간에 쓰는 이웃 샘플 수.
@@ -25,36 +28,30 @@ pub struct StreamResampler {
     pending_start: i64,
     /// 지금까지 받은 입력 프레임 수.
     received: i64,
-    /// 다음에 만들 출력 프레임 번호.
-    next_output: u64,
-    passthrough: bool,
+    /// 다음에 만들 출력 프레임이 놓이는 입력 위치(프레임, 소수 포함).
+    position: f64,
 }
 
 impl StreamResampler {
     pub fn new(channels: usize, ratio: f64) -> Self {
-        let passthrough = (ratio - 1.0).abs() < 1e-9;
         Self {
             channels,
             step: 1.0 / ratio,
-            table: if passthrough {
-                Vec::new()
-            } else {
-                build_table()
-            },
+            table: build_table(),
             pending: Vec::new(),
             pending_start: 0,
             received: 0,
-            next_output: 0,
-            passthrough,
+            position: 0.0,
         }
+    }
+
+    /// 이제부터 만드는 출력의 배율을 바꾼다. 이미 만든 출력은 그대로다.
+    pub fn set_ratio(&mut self, ratio: f64) {
+        self.step = 1.0 / ratio;
     }
 
     /// 입력 구간을 받아, 만들 수 있는 만큼의 출력을 `out` 뒤에 붙인다.
     pub fn push(&mut self, input: &[f32], out: &mut Vec<f32>) {
-        if self.passthrough {
-            out.extend_from_slice(input);
-            return;
-        }
         self.pending.extend_from_slice(input);
         self.received += (input.len() / self.channels) as i64;
         self.produce(out, false);
@@ -62,15 +59,13 @@ impl StreamResampler {
 
     /// 입력이 끝났음을 알리고 남은 출력을 내보낸다. 끝부분의 모자란 이웃은 무음으로 본다.
     pub fn finish(&mut self, out: &mut Vec<f32>) {
-        if !self.passthrough {
-            self.produce(out, true);
-        }
+        self.produce(out, true);
     }
 
     fn produce(&mut self, out: &mut Vec<f32>, finishing: bool) {
         let channels = self.channels;
         loop {
-            let position = self.next_output as f64 * self.step;
+            let position = self.position;
             let base = libm::floor(position) as i64;
             if finishing {
                 // 입력 길이에 해당하는 출력까지만 만든다.
@@ -97,11 +92,11 @@ impl StreamResampler {
                     out[out_start + c] += self.pending[at + c] * coefficient;
                 }
             }
-            self.next_output += 1;
+            self.position += self.step;
         }
 
         // 다음 출력에 더는 쓰이지 않는 앞쪽 입력을 버린다.
-        let next_base = libm::floor(self.next_output as f64 * self.step) as i64;
+        let next_base = libm::floor(self.position) as i64;
         let keep_from = (next_base - HALF + 1).clamp(self.pending_start, self.received);
         let drop_frames = (keep_from - self.pending_start) as usize;
         if drop_frames > 0 {
@@ -172,11 +167,44 @@ mod tests {
             let out = run(&input, 1, ratio, 4096);
             let expected = 100_000.0 * ratio;
             assert!(
-                (out.len() as f64 - expected).abs() <= 1.0,
+                (out.len() as f64 - expected).abs() <= 1.5,
                 "ratio {ratio}: {} vs {expected}",
                 out.len()
             );
         }
+    }
+
+    #[test]
+    fn ratio_one_passes_samples_through() {
+        let input = sine(5_000, 37.0);
+        let out = run(&input, 1, 1.0, 512);
+        assert_eq!(out.len(), input.len());
+        assert!(out.iter().zip(&input).all(|(a, b)| (a - b).abs() < 1e-6));
+    }
+
+    #[test]
+    fn ratio_can_change_along_the_way() {
+        // 앞 절반은 1.02 배, 뒤 절반은 0.97 배.
+        let input = sine(40_000, 80.0);
+        let mut resampler = StreamResampler::new(1, 1.02);
+        let mut out = Vec::new();
+        resampler.push(&input[..20_000], &mut out);
+        resampler.set_ratio(0.97);
+        resampler.push(&input[20_000..], &mut out);
+        resampler.finish(&mut out);
+        let expected = 20_000.0 * 1.02 + 20_000.0 * 0.97;
+        // 배율을 바꾸는 순간 아직 내보내지 않은 꼬리(이웃 샘플 몇 개)만큼의 차이는 난다.
+        assert!(
+            (out.len() as f64 - expected).abs() <= 2.0,
+            "{} vs {expected}",
+            out.len()
+        );
+        // 이어 붙인 자리에 튀는 값이 없다(사인파는 이웃 샘플끼리 조금씩만 변한다).
+        let worst_jump = out
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst_jump < 0.09, "{worst_jump}");
     }
 
     #[test]

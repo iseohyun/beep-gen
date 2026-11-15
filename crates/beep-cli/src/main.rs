@@ -12,8 +12,11 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use beep_core::{DEFAULT_INTRO_TEMPLATE, MusicReport, OutputFormat, SongInfo, TrackParams};
+use beep_core::{
+    DEFAULT_INTRO_TEMPLATE, Excerpt, MusicReport, OutputFormat, SongInfo, TrackParams,
+};
 use beep_native::job::{self, IntroRequest, JobError, JobRequest, MusicSource, SongLookup};
+use beep_native::tags::{self, SongTags};
 use beep_native::tts;
 use clap::{Args, Parser, Subcommand};
 
@@ -32,6 +35,47 @@ struct Cli {
 enum Command {
     /// MCP 서버로 실행한다. AI 도구가 표준 입출력으로 이 프로그램을 부를 수 있다.
     Mcp,
+    /// 음악 파일에 곡 정보를 적어 두고 이름을 "가수 - 곡" 으로 바꾼다.
+    /// 적을 값을 하나도 주지 않으면 지금 적혀 있는 정보를 보여준다.
+    Tag(TagArgs),
+}
+
+#[derive(Args, Debug)]
+struct TagArgs {
+    /// 음악 파일 경로.
+    file: PathBuf,
+
+    /// 가수.
+    #[arg(long = "artist")]
+    artist: Option<String>,
+
+    /// 곡 제목.
+    #[arg(long = "title")]
+    title: Option<String>,
+
+    /// 작곡자.
+    #[arg(long = "composer")]
+    composer: Option<String>,
+
+    /// 곡을 받은 곳의 주소(예: 동영상 주소).
+    #[arg(long = "link")]
+    link: Option<String>,
+
+    /// AI 로 만든 곡인지 (yes 또는 no).
+    #[arg(long = "ai", value_name = "yes|no")]
+    ai: Option<String>,
+
+    /// 박자 계열: 2 = 2박 계열(2/4, 4/4), 3 = 3박 계열(3/4, 6/8).
+    #[arg(long = "meter", value_name = "2|3")]
+    meter: Option<u32>,
+
+    /// 템포(BPM). 3박 계열은 강세(맥박 세 개)의 빠르기.
+    #[arg(long = "bpm")]
+    bpm: Option<f64>,
+
+    /// 파일 이름은 바꾸지 않는다.
+    #[arg(long = "no-rename")]
+    no_rename: bool,
 }
 
 #[derive(Args, Debug)]
@@ -68,6 +112,20 @@ struct GenerateArgs {
     #[arg(long = "no-ai")]
     no_ai: bool,
 
+    /// 미리듣기: 전체 대신 이 길이(초)만 만든다. 값 없이 쓰면 10초. 안내 음성은 넣지 않는다.
+    #[arg(long = "preview", value_name = "초", num_args = 0..=1,
+          default_missing_value = "10")]
+    preview: Option<f64>,
+
+    /// 미리듣기를 시작할 위치(전체 길이의 %, 0~100). 가장 가까운 강한 비프에서 시작한다.
+    #[arg(long = "preview-from", value_name = "퍼센트",
+          default_value_t = Excerpt::DEFAULT_FROM_PERCENT)]
+    preview_from: f64,
+
+    /// 자동으로 짓는 파일 이름의 형식. {n} 주기, {가수}, {곡} 을 쓸 수 있다. 예: "{곡} {n}초"
+    #[arg(long = "name-format", value_name = "형식", default_value = beep_core::DEFAULT_NAME_FORMAT)]
+    name_format: String,
+
     /// 저장할 파일 경로. 생략하면 "[주기초] 가수 - 곡.mp3" 꼴로 이름을 짓는다
     /// (음악이 없으면 "[주기초] beep.mp3", 곡을 모르면 원래 음악 파일의 이름).
     #[arg(short = 'o', long = "output")]
@@ -88,6 +146,7 @@ fn main() -> ExitCode {
         Some(Command::Mcp) => {
             mcp::serve_stdio().map_err(|e| io_failure(format!("MCP 서버가 중단되었습니다: {e}")))
         }
+        Some(Command::Tag(args)) => tag(args),
         None => generate(cli.generate),
     };
     match result {
@@ -137,6 +196,11 @@ fn generate(args: GenerateArgs) -> Result<(), Failure> {
             (None, true) => SongLookup::Detect,
             (None, false) => SongLookup::DetectWithAi,
         },
+        name_format: Some(args.name_format),
+        preview: args.preview.map(|seconds| Excerpt {
+            seconds,
+            from_percent: args.preview_from,
+        }),
         ..JobRequest::new(args.params, format)
     };
 
@@ -168,12 +232,83 @@ fn generate(args: GenerateArgs) -> Result<(), Failure> {
         }
     }
 
-    let output = args
-        .output
-        .unwrap_or_else(|| PathBuf::from(&track.file_name));
+    let output = args.output.unwrap_or_else(|| {
+        // 미리듣기가 완성본을 덮어쓰지 않게 이름을 달리한다.
+        let prefix = if args.preview.is_some() {
+            "미리듣기 "
+        } else {
+            ""
+        };
+        PathBuf::from(format!("{prefix}{}", track.file_name))
+    });
     std::fs::write(&output, &track.bytes)
         .map_err(|e| io_failure(format!("{} 에 저장하지 못했습니다: {e}", output.display())))?;
     println!("{}", output.display());
+    Ok(())
+}
+
+fn tag(args: TagArgs) -> Result<(), Failure> {
+    let ai_generated = match args.ai.as_deref().map(str::to_lowercase).as_deref() {
+        None => None,
+        Some("yes" | "y" | "true" | "예") => Some(true),
+        Some("no" | "n" | "false" | "아니오") => Some(false),
+        Some(other) => {
+            return Err(Failure {
+                message: format!("--ai 는 yes 또는 no 여야 합니다: {other}"),
+                code: 2,
+            });
+        }
+    };
+    let wanted = SongTags {
+        title: args.title,
+        artist: args.artist,
+        composer: args.composer,
+        source_url: args.link,
+        ai_generated,
+        original_name: None,
+        meter: args.meter,
+        bpm: args.bpm,
+    }
+    .cleaned();
+    let show = |tags: &SongTags| {
+        let text = |value: &Option<String>| value.clone().unwrap_or_else(|| "(없음)".into());
+        println!("곡 제목: {}", text(&tags.title));
+        println!("가수: {}", text(&tags.artist));
+        println!("작곡자: {}", text(&tags.composer));
+        println!("링크: {}", text(&tags.source_url));
+        println!(
+            "AI 활용: {}",
+            match tags.ai_generated {
+                Some(true) => "Yes",
+                Some(false) => "No",
+                None => "(없음)",
+            }
+        );
+        println!("원본 제목: {}", text(&tags.original_name));
+        println!(
+            "박자: {}",
+            match tags.meter {
+                Some(3) => "3박 계열",
+                Some(_) => "2박 계열",
+                None => "(없음)",
+            }
+        );
+        println!(
+            "템포: {}",
+            tags.bpm
+                .map_or_else(|| "(없음)".into(), |bpm| format!("{bpm:.1} BPM"))
+        );
+    };
+
+    if wanted == SongTags::default() {
+        let tags = tags::read(&args.file).map_err(|e| io_failure(e.to_string()))?;
+        show(&tags);
+        return Ok(());
+    }
+    let saved =
+        tags::save(&args.file, &wanted, !args.no_rename).map_err(|e| io_failure(e.to_string()))?;
+    show(&saved.tags);
+    println!("{}", saved.path.display());
     Ok(())
 }
 
@@ -199,7 +334,14 @@ fn print_music_report(report: &MusicReport) {
         report.tempo_change_pct,
     );
     eprintln!(
-        "길이: {:.1}초 → {:.1}초, 강한 비프 기준: {}",
+        "템포: {}, 길이: {:.1}초 → {:.1}초, 강한 비프 기준: {}",
+        if report.triple_meter {
+            "끝까지 일정(고정 격자, 3박 계열)".to_owned()
+        } else if report.steady_tempo {
+            "끝까지 일정(고정 격자)".to_owned()
+        } else {
+            format!("흔들림 최대 {:.1}%(박마다 따라감)", report.tempo_drift_pct)
+        },
         report.source_seconds,
         report.output_seconds,
         if report.anchored_on_downbeat {

@@ -11,6 +11,8 @@ use crate::resample::StreamResampler;
 
 /// 기본 안내 문구. `{n}` 주기(초), `{m}` 분할 수, `{l}` 길이(초)가 값으로 바뀐다.
 pub const DEFAULT_INTRO_TEMPLATE: &str = "{n}초, {n}초 비프";
+/// 화면에서 고를 수 있는 안내 문구. 첫 번째가 기본값이다.
+pub const INTRO_TEMPLATES: [&str; 3] = [DEFAULT_INTRO_TEMPLATE, "{n}초 비프", "{n}초 {m}분할 비프"];
 
 /// 안내 음성과 비프 사이의 무음 길이(초).
 const PAUSE_AFTER_INTRO_SEC: f64 = 0.5;

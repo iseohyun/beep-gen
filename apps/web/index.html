@@ -10,109 +10,292 @@
     <title>Beep Gen · 맞춤형 비프음 생성기</title>
   </head>
   <body>
+    <!-- 아이콘 모음: 모두 같은 굵기의 선으로 그린다(.icon 이 선 모양을 정한다). -->
+    <svg hidden xmlns="http://www.w3.org/2000/svg">
+      <symbol id="i-beep" viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6" /></symbol>
+      <symbol id="i-music" viewBox="0 0 24 24">
+        <path d="M9 18V5l11-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="17" cy="16" r="3" />
+      </symbol>
+      <symbol id="i-voice" viewBox="0 0 24 24">
+        <path d="M4 9v6h4l5 4V5L8 9H4z" />
+        <path d="M16.5 8.5a5 5 0 0 1 0 7" />
+      </symbol>
+      <symbol id="i-export" viewBox="0 0 24 24">
+        <path d="M12 3v12" />
+        <path d="M7 10l5 5 5-5" />
+        <path d="M4 20h16" />
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5" />
+      </symbol>
+      <symbol id="i-link" viewBox="0 0 24 24">
+        <path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1" />
+        <path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M20 11a8 8 0 1 0-2.3 6.3" />
+        <path d="M20 5v6h-6" />
+      </symbol>
+      <symbol id="i-ai" viewBox="0 0 24 24">
+        <path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8z" />
+        <path d="M19 15v5" />
+        <path d="M16.5 17.5h5" />
+      </symbol>
+      <symbol id="i-save" viewBox="0 0 24 24">
+        <path d="M5 4h11l3 3v13H5z" />
+        <path d="M8 4v5h7V4" />
+        <path d="M8 20v-6h8v6" />
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z" /></symbol>
+      <symbol id="i-reset" viewBox="0 0 24 24">
+        <path d="M4 12a8 8 0 1 0 2.3-5.7" />
+        <path d="M4 5v5h5" />
+      </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></symbol>
+    </svg>
+
     <main class="app">
       <header class="app-header">
-        <h1>Beep Gen</h1>
-        <p class="tagline">원하는 주기와 박자로 비프음 파일을 만듭니다. 모든 처리는 이 기기 안에서 이루어집니다.</p>
+        <div class="app-title">
+          <h1>Beep Gen</h1>
+          <span id="version" class="version" title="버전 + 빌드 태그 . 빌드한 시각"></span>
+          <div class="header-actions">
+            <button id="update" type="button" class="icon-button small" disabled hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
+              <span>업데이트</span>
+            </button>
+            <button id="reset" type="button" class="icon-button small" title="모든 입력값을 처음 값으로 되돌립니다">
+              <svg class="icon" aria-hidden="true"><use href="#i-reset" /></svg>
+              <span>초기화</span>
+            </button>
+          </div>
+        </div>
       </header>
 
-      <form id="settings" class="card">
-        <div id="music-section" class="field" hidden>
-          <label for="music">배경 음악 (선택)</label>
-          <div class="field-control">
-            <input
-              id="music"
-              type="file"
-              accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a"
-              aria-describedby="music-hint"
-            />
-            <button id="music-clear" type="button" hidden>음악 빼기</button>
-          </div>
-          <div id="music-url-row" class="field-control" hidden>
-            <input
-              id="music-url"
-              type="url"
-              inputmode="url"
-              placeholder="또는 오디오 파일 주소 (https://.../song.mp3)"
-              aria-label="오디오 파일 주소"
-              aria-describedby="music-hint"
-            />
-          </div>
-          <div id="song-row" class="field-control" hidden>
-            <input
-              id="song-artist"
-              type="text"
-              placeholder="가수"
-              aria-label="가수"
-              aria-describedby="song-status"
-              autocomplete="off"
-              maxlength="80"
-            />
-            <input
-              id="song-title"
-              type="text"
-              placeholder="곡 제목"
-              aria-label="곡 제목"
-              aria-describedby="song-status"
-              autocomplete="off"
-              maxlength="80"
-            />
-          </div>
-          <p id="song-status" class="hint" role="status" hidden></p>
-          <p id="music-hint" class="hint">
-            음악을 넣으면 비프 템포에 맞춰 속도를 바꿔 함께 넣습니다. 음원 길이는 음악 길이를 따릅니다.
-            파일은 이 기기 밖으로 나가지 않습니다.
-          </p>
-        </div>
-
-        <div id="basic-fields" class="fields"></div>
-
-        <div class="field">
-          <label for="format">파일 형식</label>
-          <div class="field-control">
-            <select id="format"></select>
-          </div>
-        </div>
-
-        <details class="advanced">
-          <summary>고급 설정</summary>
-          <div id="advanced-fields" class="fields"></div>
-        </details>
-
-        <div id="intro-section" class="field" hidden>
-          <label for="intro-template">시작 안내 음성 (선택)</label>
-          <div id="intro-setup" class="setup" hidden>
-            <p id="intro-setup-text"></p>
-            <ul id="intro-setup-terms"></ul>
-            <p id="intro-setup-license" class="hint"></p>
-            <div class="actions">
-              <button id="intro-install" type="button"></button>
+      <form id="settings">
+        <fieldset id="controls" class="plain">
+          <!-- ── 비프 ── -->
+          <details id="sec-beep" class="card section" open>
+            <summary>
+              <svg class="icon"><use href="#i-beep" /></svg><span>비프</span>
+              <svg class="icon chevron"><use href="#i-chevron" /></svg>
+            </summary>
+            <div class="section-body">
+              <div id="beep-rows" class="rows"></div>
+              <details class="sub">
+                <summary>고급</summary>
+                <div id="beep-advanced-rows" class="rows"></div>
+              </details>
             </div>
-            <progress id="intro-install-progress" max="100" value="0" hidden></progress>
-            <p id="intro-install-status" class="status" role="status" aria-live="polite"></p>
-          </div>
-          <div id="intro-controls" hidden>
-            <div class="field-control">
-              <input id="intro-template" type="text" maxlength="200" aria-describedby="intro-hint" />
+          </details>
+
+          <!-- ── 배경음 ── -->
+          <details id="sec-music" class="card section" open hidden>
+            <summary>
+              <svg class="icon"><use href="#i-music" /></svg><span>배경음</span>
+              <svg class="icon chevron"><use href="#i-chevron" /></svg>
+            </summary>
+            <div class="section-body">
+              <div id="music-choose">
+                <div class="choose">
+                  <button id="music-pick" type="button" class="icon-button" title="음악 파일 열기">
+                    <svg class="icon"><use href="#i-file" /></svg><span>파일</span>
+                  </button>
+                  <button id="music-url-open" type="button" class="icon-button" title="오디오 파일 주소 입력" hidden>
+                    <svg class="icon"><use href="#i-link" /></svg><span>URL</span>
+                  </button>
+                </div>
+                <input id="music" type="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" hidden />
+                <div id="music-url-row" class="inline" hidden>
+                  <input
+                    id="music-url"
+                    type="text"
+                    inputmode="url"
+                    placeholder="https://.../song.mp3"
+                    aria-label="오디오 파일 주소"
+                  />
+                  <button id="music-url-ok" type="button">확인</button>
+                </div>
+                <p class="hint">
+                  배경음을 넣으면 비프 템포에 맞춰 속도를 바꿔 함께 넣습니다. 음원 길이는 음악 길이를 따릅니다.
+                  파일은 이 기기 밖으로 나가지 않습니다.
+                </p>
+              </div>
+
+              <div id="music-rows" class="rows" hidden>
+                <div class="row">
+                  <label for="music-name">배경음</label>
+                  <div class="cell-value"><input id="music-name" type="text" readonly /></div>
+                  <span class="cell-unit">
+                    <button id="music-clear" type="button" class="icon-only" title="배경음 다시 고르기" aria-label="배경음 다시 고르기">
+                      <svg class="icon"><use href="#i-refresh" /></svg>
+                    </button>
+                  </span>
+                </div>
+                <div class="row">
+                  <label for="song-artist">가수 <code>{가수}</code></label>
+                  <div class="cell-value wide">
+                    <input id="song-artist" type="text" autocomplete="off" maxlength="80" aria-describedby="song-status" />
+                  </div>
+                </div>
+                <div class="row">
+                  <label for="song-title">곡명 <code>{곡}</code></label>
+                  <div class="cell-value wide">
+                    <input id="song-title" type="text" autocomplete="off" maxlength="80" aria-describedby="song-status" />
+                  </div>
+                </div>
+                <div class="row tag-only">
+                  <label for="song-composer">작곡자</label>
+                  <div class="cell-value wide">
+                    <input id="song-composer" type="text" autocomplete="off" maxlength="80" />
+                  </div>
+                </div>
+                <div class="row tag-only">
+                  <label for="song-link">링크</label>
+                  <div class="cell-value wide">
+                    <input id="song-link" type="text" inputmode="url" autocomplete="off" placeholder="곡을 받은 곳의 주소" />
+                  </div>
+                </div>
+                <div class="row tag-only">
+                  <span class="cell-label">원본 파일</span>
+                  <div class="cell-value checks">
+                    <label class="check" title="AI 로 만든 곡인지">
+                      <svg class="icon"><use href="#i-ai" /></svg>
+                      <input id="song-ai" type="checkbox" /><span>AI 활용</span>
+                    </label>
+                    <label class="check" title="저장할 때 파일 이름도 &quot;가수 - 곡&quot; 으로 바꿉니다">
+                      <input id="song-rename" type="checkbox" checked /><span>파일명 갱신</span>
+                    </label>
+                  </div>
+                  <span class="cell-unit">
+                    <button id="song-save" type="button" class="icon-only" title="곡 정보를 원본 음악 파일에 저장" aria-label="곡 정보를 원본 음악 파일에 저장">
+                      <svg class="icon"><use href="#i-save" /></svg>
+                    </button>
+                  </span>
+                </div>
+                <p id="song-status" class="row-note hint" role="status" hidden></p>
+                <div id="music-tempo-rows" class="row-group"></div>
+                <p id="tempo-note" class="row-note hint" role="status" hidden></p>
+                <div id="music-level-rows" class="row-group"></div>
+              </div>
             </div>
-            <div class="field-control">
-              <select id="intro-voice" aria-label="안내 음성의 목소리">
-                <option value="">목소리 자동 선택</option>
-              </select>
+          </details>
+
+          <!-- ── 시작음 ── -->
+          <details id="sec-intro" class="card section" open hidden>
+            <summary>
+              <svg class="icon"><use href="#i-voice" /></svg><span>시작음</span>
+              <svg class="icon chevron"><use href="#i-chevron" /></svg>
+            </summary>
+            <div class="section-body">
+              <div id="intro-setup" class="setup" hidden>
+                <p id="intro-setup-text"></p>
+                <ul id="intro-setup-terms"></ul>
+                <p id="intro-setup-license" class="hint"></p>
+                <div class="actions">
+                  <button id="intro-install" type="button"></button>
+                </div>
+                <progress id="intro-install-progress" max="100" value="0" hidden></progress>
+                <p id="intro-install-status" class="status" role="status" aria-live="polite"></p>
+              </div>
+              <div id="intro-controls" class="rows" hidden>
+                <div class="row">
+                  <label for="intro-preset">문구</label>
+                  <div class="cell-value wide"><select id="intro-preset"></select></div>
+                </div>
+                <div id="intro-custom-row" class="row" hidden>
+                  <span class="cell-label"></span>
+                  <div class="cell-value wide">
+                    <input id="intro-template" type="text" maxlength="200" aria-label="직접 적는 안내 문구" aria-describedby="intro-hint" />
+                  </div>
+                </div>
+                <p id="intro-hint" class="row-note hint" hidden></p>
+                <div class="row">
+                  <label for="intro-voice">목소리</label>
+                  <div class="cell-value wide">
+                    <select id="intro-voice">
+                      <option value="">자동 선택</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <button id="intro-remove" type="button" class="link" hidden>내려받은 음성 모델 지우기</button>
             </div>
-            <p id="intro-hint" class="hint"></p>
-            <button id="intro-remove" type="button" class="link" hidden>내려받은 음성 모델 지우기</button>
-          </div>
-        </div>
+          </details>
 
-        <p id="tts-note" class="note" hidden></p>
+          <p id="tts-note" class="note" hidden></p>
 
-        <div class="actions">
-          <button id="generate" type="submit" class="primary" disabled>음원 만들기</button>
-          <button id="reset" type="button">기본값으로</button>
-        </div>
-
-        <progress id="progress" max="100" value="0" hidden></progress>
+          <!-- ── 생성 ── -->
+          <details id="sec-generate" class="card section" open>
+            <summary>
+              <svg class="icon"><use href="#i-export" /></svg><span>생성</span>
+              <svg class="icon chevron"><use href="#i-chevron" /></svg>
+            </summary>
+            <div class="section-body">
+              <div class="rows">
+                <div class="row">
+                  <label for="preview-from">미리듣기</label>
+                  <div class="cell-value">
+                    <select id="preview-from" aria-describedby="preview-hint">
+                      <option value="0">시작</option>
+                      <option value="30">앞</option>
+                      <option value="50">중</option>
+                      <option value="80">뒤</option>
+                    </select>
+                  </div>
+                  <span class="cell-unit">
+                    <button id="preview" type="button" class="icon-button" disabled>
+                      <svg class="icon"><use href="#i-play" /></svg><span id="preview-label">미리듣기</span>
+                    </button>
+                  </span>
+                </div>
+                <audio id="preview-player" class="row-note" controls preload="metadata" hidden></audio>
+                <div class="row">
+                  <label for="format">파일 형식</label>
+                  <div class="cell-value wide"><select id="format"></select></div>
+                </div>
+                <div class="row">
+                  <label for="name-format">파일명</label>
+                  <div class="cell-value wide">
+                    <select id="name-format" aria-describedby="name-format-hint"></select>
+                  </div>
+                </div>
+                <div id="name-format-custom-row" class="row" hidden>
+                  <span class="cell-label"></span>
+                  <div class="cell-value wide">
+                    <input
+                      id="name-format-custom"
+                      type="text"
+                      aria-label="직접 적는 파일 이름 형식"
+                      aria-describedby="name-format-hint"
+                      autocomplete="off"
+                      maxlength="120"
+                    />
+                  </div>
+                </div>
+                <p id="name-format-hint" class="row-note hint" hidden></p>
+                <div id="save-where-row" class="row" hidden>
+                  <label for="save-where">위치</label>
+                  <div class="cell-value wide"><select id="save-where"></select></div>
+                </div>
+              </div>
+              <details class="sub">
+                <summary>고급</summary>
+                <div id="generate-advanced-rows" class="rows"></div>
+              </details>
+              <div class="actions">
+                <button id="generate" type="submit" class="primary" disabled>만들기</button>
+              </div>
+              <progress id="progress" max="100" value="0" hidden></progress>
+            </div>
+          </details>
+        </fieldset>
         <p id="status" class="status" role="status" aria-live="polite"></p>
       </form>
 
@@ -123,12 +306,11 @@
         <div id="music-report" hidden></div>
         <div class="actions">
           <button id="download" type="button" class="primary">파일 저장</button>
+          <button id="show-folder" type="button" class="icon-only" title="저장한 폴더 열기" aria-label="저장한 폴더 열기" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-folder" /></svg>
+          </button>
         </div>
       </section>
-
-      <footer class="app-footer">
-        <span id="version"></span>
-      </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
