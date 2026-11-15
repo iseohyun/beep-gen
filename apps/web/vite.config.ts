@@ -30,7 +30,17 @@ function precacheManifest(): Plugin {
   };
 }
 
+/** 빌드한 시각(월일-시분). 화면과 제목표시줄에 보여, 지금 보는 것이 어느 빌드인지 알 수 있게 한다. */
+function buildStamp(): string {
+  const now = new Date();
+  const two = (value: number): string => String(value).padStart(2, "0");
+  return `${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
+}
+
 export default defineConfig({
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp()),
+  },
   // 상대 경로로 빌드한다. GitHub Pages(/beep-gen/)와 로컬 테스트 서버(/beep-gen/,
   // /beep-gen@브랜치/) 어디에 올려도 같은 결과물이 동작해야 하기 때문이다.
   base: "./",

@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use beep_core::{
-    MusicName, MusicReport, OutputFormat, SongInfo, TrackInputs, TrackParams, build_track,
-    intro_text, output_file_name,
+    DEFAULT_NAME_FORMAT, Excerpt, MusicName, MusicReport, OutputFormat, SongInfo, TrackInputs,
+    TrackParams, build_track, format_file_name, intro_text,
 };
 
 use crate::song::{self, IdentifiedBy};
@@ -68,6 +68,10 @@ pub struct JobRequest {
     /// 원래 음악 파일의 이름. 생략하면 경로나 주소에서 얻는다.
     pub music_name: Option<String>,
     pub song_lookup: SongLookup,
+    /// 미리듣기: 전체 대신 이 구간만 만든다. 안내 음성은 넣지 않는다.
+    pub preview: Option<Excerpt>,
+    /// 결과 파일의 이름 형식(예: `{곡} {n}초`). 생략하면 기본 형식.
+    pub name_format: Option<String>,
 }
 
 impl JobRequest {
@@ -81,6 +85,8 @@ impl JobRequest {
             song: SongInfo::default(),
             music_name: None,
             song_lookup: SongLookup::default(),
+            preview: None,
+            name_format: None,
         }
     }
 }
@@ -152,7 +158,9 @@ pub fn run(
         .map(|bytes| name_music(request, bytes, &mut notices));
 
     // 안내 음성을 만들지 못해도 음원은 만든다. 대신 그 사실을 알린다.
-    let intro = request.intro.as_ref().and_then(|intro| {
+    // 미리듣기는 비프와 음악의 균형·박자를 듣는 용도라 안내 음성을 넣지 않는다.
+    let wanted_intro = request.intro.as_ref().filter(|_| request.preview.is_none());
+    let intro = wanted_intro.and_then(|intro| {
         let text = intro_text(&intro.template, &request.params);
         if text.is_empty() {
             return None;
@@ -173,6 +181,7 @@ pub fn run(
     let inputs = TrackInputs {
         music: music.as_deref(),
         intro: intro.as_deref(),
+        excerpt: request.preview,
     };
     let mut last = None;
     let output = build_track(&request.params, request.format, inputs, |progress| {
@@ -185,7 +194,15 @@ pub fn run(
 
     Ok(JobOutput {
         bytes: output.bytes,
-        file_name: output_file_name(&request.params, request.format, music_name.as_ref()),
+        file_name: format_file_name(
+            request
+                .name_format
+                .as_deref()
+                .unwrap_or(DEFAULT_NAME_FORMAT),
+            &request.params,
+            request.format,
+            music_name.as_ref(),
+        ),
         song: music_name.map(|name| name.song).unwrap_or_default(),
         music_report: output.music,
         intro_seconds: output.intro_seconds,
@@ -206,7 +223,8 @@ fn name_music(request: &JobRequest, bytes: &[u8], notices: &mut Vec<String>) -> 
     let mut song = request.song.clone().cleaned();
 
     // 사용자가 곡 제목을 알려줬으면 더 찾지 않는다.
-    let ask_ai = request.song_lookup == SongLookup::DetectWithAi;
+    // 미리듣기는 빨리 들려주는 것이 먼저라, 답을 기다려야 하는 로컬 AI 에는 묻지 않는다.
+    let ask_ai = request.song_lookup == SongLookup::DetectWithAi && request.preview.is_none();
     if request.song_lookup != SongLookup::Given && song.title.is_none() {
         let found = song::identify(Some(bytes), source_name.as_deref(), ask_ai);
         if let Some(problem) = found.problem {
@@ -321,6 +339,24 @@ mod tests {
         assert_eq!(output.file_name, "[1초] beep.wav");
         assert!(output.notices.is_empty());
         assert_eq!(stages.last().unwrap().0, 100);
+    }
+
+    #[test]
+    fn preview_is_short_and_has_no_intro() {
+        let mut req = request();
+        req.params.length_sec = 60;
+        req.intro = Some(IntroRequest {
+            template: "hello".into(),
+            voice: None,
+        });
+        req.preview = Some(Excerpt {
+            seconds: 2.0,
+            from_percent: 0.0,
+        });
+        let output = run(&req, |_, _| {}).unwrap();
+        assert_eq!(output.bytes.len(), 44 + 2 * 44_100 * 2);
+        assert_eq!(output.intro_seconds, 0.0);
+        assert!(output.notices.is_empty(), "{:?}", output.notices);
     }
 
     #[test]

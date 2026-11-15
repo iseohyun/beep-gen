@@ -1,10 +1,10 @@
 //! 결과 파일의 이름 짓기.
 //!
-//! 규칙: `[{주기}초] {가수} - {곡}.{확장자}`
+//! 기본 형식: `[{n}초] {가수} - {곡}.{확장자}`. 형식은 바꿀 수 있다(예: `{곡} {n}초`).
 //!
-//! - 배경 음악이 없으면 `[1.4초] beep.mp3`
-//! - 가수와 곡을 알면 `[1.4초] 가수 - 곡.mp3`, 곡만 알면 `[1.4초] 곡.mp3`
-//! - 곡을 모르면 원래 음악 파일의 이름을 쓴다: `[1.4초] 원래이름.mp3`
+//! - 배경 음악이 없으면 `{곡}` 자리에 `beep` 이 들어간다: `[1.4초] beep.mp3`
+//! - 가수와 곡을 알면 `[1.4초] 가수 - 곡.mp3`, 곡만 알면 가수와 그 옆의 구분자를 뺀다: `[1.4초] 곡.mp3`
+//! - 곡을 모르면 `{곡}` 자리에 원래 음악 파일의 이름을 쓴다: `[1.4초] 원래이름.mp3`
 //!
 //! 가수와 곡은 (1) 음악 파일에 적힌 태그 (2) `가수 - 곡` 꼴의 파일 이름에서 찾는다.
 //! 그래도 모르면 로컬 어댑터가 로컬 AI 에 묻거나 사용자가 직접 적는다(코어 밖의 일).
@@ -21,6 +21,15 @@ const BEEP_ONLY_NAME: &str = "beep";
 const UNKNOWN_MUSIC_NAME: &str = "music";
 /// 이름 한 토막의 최대 길이(글자 수). 운영체제의 파일 이름 한계를 넘지 않게 한다.
 const MAX_PART_CHARS: usize = 80;
+
+/// 기본 이름 형식.
+pub const DEFAULT_NAME_FORMAT: &str = "[{n}초] {가수} - {곡}";
+/// 고를 수 있는 이름 형식(화면의 목록). 첫 번째가 기본값이다.
+pub const NAME_FORMATS: [&str; 3] = [DEFAULT_NAME_FORMAT, "{곡} {n}초", "{가수} - {곡} {n}초"];
+/// 형식에 쓸 수 있는 자리표시자 설명.
+pub const NAME_FORMAT_HINT: &str = "{n} 은 주기(초), {가수} 와 {곡} 은 배경 음악의 가수와 곡 제목으로 바뀝니다. 가수를 모르면 가수와 그 옆의 구분자(-)는 빠집니다.";
+/// 가수 자리표시자가 비었을 때 함께 지우는 구분자 글자.
+const SEPARATORS: [char; 7] = [' ', '-', '–', '—', '_', ',', '·'];
 
 /// 가수와 곡 제목. 모르는 쪽은 비워 둔다.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,36 +122,84 @@ pub fn identify_song(music: Option<&[u8]>, source_name: Option<&str>) -> SongGue
     SongGuess::default()
 }
 
-/// 결과 파일의 이름. `music` 이 `None` 이면 비프만 있는 음원이다.
+/// 결과 파일의 이름(기본 형식). `music` 이 `None` 이면 비프만 있는 음원이다.
 pub fn output_file_name(
     params: &TrackParams,
     format: OutputFormat,
     music: Option<&MusicName>,
 ) -> String {
-    let body = match music {
-        None => BEEP_ONLY_NAME.to_owned(),
+    format_file_name(DEFAULT_NAME_FORMAT, params, format, music)
+}
+
+/// 결과 파일의 이름을 `template` 형식으로 짓는다.
+///
+/// 자리표시자: `{n}` 주기, `{m}` 분할 수, `{가수}`(`{artist}`), `{곡}`(`{title}`, `{곡명}`).
+/// 형식이 비어 있거나 남는 것이 없으면 기본 형식을 쓴다.
+pub fn format_file_name(
+    template: &str,
+    params: &TrackParams,
+    format: OutputFormat,
+    music: Option<&MusicName>,
+) -> String {
+    // {곡}: 곡 제목 → 모르면 원래 파일 이름 → 음악이 없으면 "beep".
+    // {가수}: 곡 제목을 알 때만 쓴다(원래 파일 이름에는 이미 들어 있을 수 있다).
+    let (artist, title) = match music {
+        None => (None, BEEP_ONLY_NAME.to_owned()),
         Some(music) => {
             let song = music.song.clone().cleaned();
-            let title = song.title.as_deref().and_then(safe_part);
-            let artist = song.artist.as_deref().and_then(safe_part);
-            match (artist, title) {
-                (Some(artist), Some(title)) => format!("{artist} - {title}"),
-                (None, Some(title)) => title,
-                // 곡을 모르면 원래 파일 이름을 그대로 쓴다.
-                (_, None) => music
-                    .source_name
-                    .as_deref()
-                    .and_then(|name| safe_part(file_stem(name)))
-                    .unwrap_or_else(|| UNKNOWN_MUSIC_NAME.to_owned()),
+            match song.title.as_deref().and_then(safe_part) {
+                Some(title) => (song.artist.as_deref().and_then(safe_part), title),
+                None => (
+                    None,
+                    music
+                        .source_name
+                        .as_deref()
+                        .and_then(|name| safe_part(file_stem(name)))
+                        .unwrap_or_else(|| UNKNOWN_MUSIC_NAME.to_owned()),
+                ),
             }
         }
     };
-    format!(
-        "[{}초] {}.{}",
-        params.interval_label(),
-        body,
-        format.extension()
-    )
+
+    let render = |template: &str| -> Option<String> {
+        let mut text = template
+            .replace("{artist}", "{가수}")
+            .replace("{title}", "{곡}")
+            .replace("{곡명}", "{곡}");
+        if artist.is_none() {
+            text = drop_with_separators(&text, "{가수}");
+        }
+        let text = text
+            .replace("{가수}", artist.as_deref().unwrap_or_default())
+            .replace("{곡}", &title)
+            .replace("{n}", &params.interval_label())
+            .replace("{m}", &params.subdivision.to_string());
+        safe_name(&text)
+    };
+    let body = render(template.trim())
+        .or_else(|| render(DEFAULT_NAME_FORMAT))
+        .unwrap_or_else(|| BEEP_ONLY_NAME.to_owned());
+    format!("{body}.{}", format.extension())
+}
+
+/// `token` 을 지우면서 그 옆의 구분자도 함께 지운다.
+/// 뒤에 구분자가 있으면 뒤쪽을(`{가수} - {곡}` → `{곡}`), 없으면 앞쪽을 지운다.
+fn drop_with_separators(text: &str, token: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(token) {
+        let before = &rest[..at];
+        let after = &rest[at + token.len()..];
+        let trimmed_after = after.trim_start_matches(SEPARATORS);
+        if trimmed_after.len() < after.len() {
+            out.push_str(before);
+        } else {
+            out.push_str(before.trim_end_matches(SEPARATORS));
+        }
+        rest = trimmed_after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// 경로에서 폴더와 확장자를 뗀 이름.
@@ -282,6 +339,21 @@ fn collapse_spaces(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// 완성한 이름에서 쓸 수 없는 글자를 바꾼다(길이는 줄이지 않는다). 남는 것이 없으면 `None`.
+fn safe_name(text: &str) -> Option<String> {
+    let replaced: String = text
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect();
+    let collapsed = collapse_spaces(&replaced);
+    let trimmed = collapsed.trim().trim_end_matches(['.', ' ']);
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
 /// 파일 이름에 쓸 수 없는 글자를 바꾸고 길이를 줄인다. 남는 것이 없으면 `None`.
 fn safe_part(text: &str) -> Option<String> {
     let replaced: String = text
@@ -358,6 +430,57 @@ mod tests {
         ];
         for (music, expected) in cases {
             assert_eq!(name(&params, Some(&music)), expected, "{music:?}");
+        }
+    }
+
+    #[test]
+    fn other_formats_can_be_chosen() {
+        let params = TrackParams {
+            interval_sec: 1.4,
+            ..TrackParams::default()
+        };
+        let full = music(Some("아이유"), Some("Blueming"), Some("x.mp3"));
+        let title_only = music(None, Some("Blueming"), Some("x.mp3"));
+        let unknown = music(None, None, Some("track 07.flac"));
+        let name = |template: &str, music: Option<&MusicName>| {
+            format_file_name(template, &params, OutputFormat::Mp3, music)
+        };
+
+        assert_eq!(name("{곡} {n}초", Some(&full)), "Blueming 1.4초.mp3");
+        assert_eq!(name("{곡} {n}초", Some(&unknown)), "track 07 1.4초.mp3");
+        assert_eq!(name("{곡} {n}초", None), "beep 1.4초.mp3");
+        assert_eq!(
+            name("{가수} - {곡} {n}초", Some(&full)),
+            "아이유 - Blueming 1.4초.mp3"
+        );
+        // 가수를 모르면 가수와 그 옆의 구분자를 함께 뺀다.
+        assert_eq!(
+            name("{가수} - {곡} {n}초", Some(&title_only)),
+            "Blueming 1.4초.mp3"
+        );
+        assert_eq!(
+            name("{곡} ({가수}) {n}s", Some(&title_only)),
+            "Blueming () 1.4s.mp3"
+        );
+        assert_eq!(
+            name("{n}초 {곡} - {가수}", Some(&title_only)),
+            "1.4초 Blueming.mp3"
+        );
+        // 영어 자리표시자, 분할 수, 쓸 수 없는 글자.
+        assert_eq!(
+            name("{artist}_{title}_{n}s_m{m}", Some(&full)),
+            "아이유_Blueming_1.4s_m2.mp3"
+        );
+        assert_eq!(name("{곡}: {n}초?", Some(&full)), "Blueming_ 1.4초_.mp3");
+        // 비어 있는 형식은 기본 형식으로.
+        assert_eq!(name("  ", Some(&full)), "[1.4초] 아이유 - Blueming.mp3");
+        // 목록의 모든 형식이 기본 규칙과 같은 재료로 이름을 만든다.
+        for template in NAME_FORMATS {
+            assert!(
+                name(template, Some(&full)).contains("Blueming"),
+                "{template}"
+            );
+            assert!(name(template, None).contains("beep"), "{template}");
         }
     }
 

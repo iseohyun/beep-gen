@@ -3,7 +3,8 @@
 //! 자바스크립트와 값을 주고받는 일만 한다. 소리를 만드는 계산은 전부 코어에 있다.
 //! 파라미터는 JSON 문자열로 받는다. 필드 이름은 CLI 옵션 이름과 같다(예: `weak-volume`).
 
-use beep_core::{MusicName, OutputFormat, TrackInputs, TrackParams};
+use beep_core::{Excerpt, MusicName, OutputFormat, TrackInputs, TrackParams};
+use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 fn parse_params(params_json: &str) -> Result<TrackParams, JsError> {
@@ -72,11 +73,32 @@ pub fn identify_song(music: Option<Vec<u8>>, source_name: Option<String>) -> Str
     .to_string()
 }
 
+/// 곡의 소리 크기를 재서 음량 안내를 JSON 으로 돌려준다:
+/// 곡의 최대·평균·최빈 크기와, 비프 음량 슬라이더가 달라붙을 지점들.
+#[wasm_bindgen]
+pub fn level_guide(music: &[u8]) -> Result<String, JsError> {
+    let guide = beep_core::level_guide(music).map_err(|e| JsError::new(&e.to_string()))?;
+    Ok(serde_json::to_string(&guide).unwrap_or_default())
+}
+
+/// `build_track` 의 선택 사항.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct BuildOptions {
+    music_name: MusicName,
+    preview: Option<Excerpt>,
+    /// 결과 파일의 이름 형식. 생략하면 기본 형식.
+    name_format: Option<String>,
+}
+
 /// 음원을 만든다.
 ///
 /// `music` 에 음악 파일 바이트를 주면 비프 템포에 맞춰 함께 넣는다.
-/// `music_name_json` 은 결과 파일의 이름을 짓는 데 쓰는 정보다:
-/// `{"song": {"artist": .., "title": ..}, "source_name": "원래 파일 이름"}` (모두 생략 가능).
+/// `options_json` 은 그 밖의 선택 사항이다(모두 생략 가능):
+/// - `music_name`: 결과 파일의 이름을 짓는 데 쓰는 정보
+///   `{"song": {"artist": .., "title": ..}, "source_name": "원래 파일 이름"}`
+/// - `preview`: 미리듣기. 전체 대신 일부만 만든다 `{"seconds": 10, "from_percent": 30}`
+/// - `name_format`: 결과 파일의 이름 형식(예: `"{곡} {n}초"`)
 /// `intro` 에 안내 음성 파일 바이트를 주면 맨 앞에 넣는다.
 /// `on_progress(percent, stageKey, stageLabel)` 는 진행 상황이 바뀔 때마다 호출된다.
 #[wasm_bindgen]
@@ -84,21 +106,22 @@ pub fn build_track(
     params_json: &str,
     format: &str,
     music: Option<Vec<u8>>,
-    music_name_json: Option<String>,
+    options_json: Option<String>,
     intro: Option<Vec<u8>>,
     on_progress: &js_sys::Function,
 ) -> Result<TrackResult, JsError> {
     let params = parse_params(params_json)?;
     let format = parse_format(format)?;
-    let music_name: MusicName = match music_name_json.as_deref() {
-        Some(json) => {
-            serde_json::from_str(json).map_err(|e| JsError::new(&format!("잘못된 곡 정보: {e}")))?
-        }
-        None => MusicName::default(),
+    let options: BuildOptions = match options_json.as_deref() {
+        Some(json) => serde_json::from_str(json)
+            .map_err(|e| JsError::new(&format!("잘못된 선택 사항: {e}")))?,
+        None => BuildOptions::default(),
     };
+    let music_name = options.music_name.clone();
     let inputs = TrackInputs {
         music: music.as_deref(),
         intro: intro.as_deref(),
+        excerpt: options.preview,
     };
     let mut last = None;
     let output = beep_core::build_track(&params, format, inputs, |progress| {
@@ -117,7 +140,11 @@ pub fn build_track(
 
     Ok(TrackResult {
         bytes: output.bytes,
-        file_name: beep_core::output_file_name(
+        file_name: beep_core::format_file_name(
+            options
+                .name_format
+                .as_deref()
+                .unwrap_or(beep_core::DEFAULT_NAME_FORMAT),
             &params,
             format,
             music.is_some().then_some(&music_name),

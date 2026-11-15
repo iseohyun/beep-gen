@@ -8,6 +8,7 @@ pub mod ai;
 pub mod fetch;
 pub mod job;
 pub mod song;
+pub mod tags;
 pub mod tts;
 
 use std::fmt;

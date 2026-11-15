@@ -46,11 +46,22 @@ pub fn create_tone(frequency: f64, duration_sec: f64, volume: f64, sample_rate: 
         .collect()
 }
 
+/// 3박 계열 곡에서 한 마디(비프 세 개)의 강약.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TripleAccent {
+    /// 분할대로 강약을 놓고 마디마다 다시 시작한다(2분할이면 강약강).
+    BySubdivision,
+    /// 마디의 첫 비프만 강하다(강약약).
+    FirstOnly,
+}
+
 /// 비프 시퀀스를 구간 단위로 만들어 내는 생성기(모노).
 pub struct BeepSequence {
     primary: Vec<f32>,
     sub: Vec<f32>,
     subdivision: i64,
+    /// 3박 계열 곡에 맞출 때의 강약(비프 세 개가 한 마디). 아니면 `None`.
+    triple: Option<TripleAccent>,
     /// 비프 사이의 간격(샘플, 소수 포함). 비프 위치는 매번 여기서 다시 계산해 오차가 쌓이지 않는다.
     step_samples: f64,
     /// 0번 비프(강한 비프)의 위치(샘플). 음악에 맞출 때는 기준 박의 위치가 된다.
@@ -70,11 +81,28 @@ impl BeepSequence {
     /// 길이와 기준 위치를 직접 정한다. 0번 비프가 `anchor_frames` 에 오고,
     /// 그 앞뒤로 같은 간격의 비프가 이어진다(앞쪽은 0초 이후 것만).
     pub fn with_layout(params: &TrackParams, total_frames: u64, anchor_frames: f64) -> Self {
+        Self::with_meter(params, total_frames, anchor_frames, false)
+    }
+
+    /// `with_layout` 과 같되, `triple` 이면 3박 계열 곡에 맞춘다: 비프 세 개가 한 마디이고
+    /// 0번 비프가 마디의 첫 비프다. 강약은 `params.triple_accent` 를 따른다.
+    pub fn with_meter(
+        params: &TrackParams,
+        total_frames: u64,
+        anchor_frames: f64,
+        triple: bool,
+    ) -> Self {
+        let triple = triple.then_some(if params.triple_accent == 1 {
+            TripleAccent::FirstOnly
+        } else {
+            TripleAccent::BySubdivision
+        });
         let sr = f64::from(params.sample_rate);
         let step_sec = params.step_sec();
         let duration = BEEP_DURATION_SEC.min(step_sec * BEEP_MAX_STEP_RATIO);
         let primary = create_tone(params.primary_freq, duration, 1.0, params.sample_rate);
-        let sub = if params.subdivision > 1 {
+        // 강약약은 1분할이어도 약한 비프가 있다.
+        let sub = if params.subdivision > 1 || triple == Some(TripleAccent::FirstOnly) {
             create_tone(
                 params.sub_freq,
                 duration,
@@ -88,6 +116,7 @@ impl BeepSequence {
             primary,
             sub,
             subdivision: i64::from(params.subdivision.max(1)),
+            triple,
             step_samples: step_sec * sr,
             anchor: anchor_frames,
             total_frames,
@@ -132,11 +161,15 @@ impl BeepSequence {
             if start >= chunk_end {
                 break;
             }
-            let tone = if index.rem_euclid(self.subdivision) == 0 {
-                &self.primary
-            } else {
-                &self.sub
+            let strong = match self.triple {
+                None => index.rem_euclid(self.subdivision) == 0,
+                // 마디(비프 세 개) 안에서의 순번으로 정한다.
+                Some(TripleAccent::BySubdivision) => {
+                    index.rem_euclid(3).rem_euclid(self.subdivision) == 0
+                }
+                Some(TripleAccent::FirstOnly) => index.rem_euclid(3) == 0,
             };
+            let tone = if strong { &self.primary } else { &self.sub };
             // 0초 이전에 시작하는 비프는 잘린 채 들리므로 통째로 뺀다.
             // 그 밖에는 비프와 구간이 겹치는 부분만 복사한다.
             let from = chunk_start.max(start);
@@ -157,6 +190,46 @@ impl BeepSequence {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 3박 계열로 만든 비프에서, 처음 `count` 개 비프가 강한지(true) 약한지.
+    fn triple_pattern(subdivision: u32, accent: u32, count: usize) -> Vec<bool> {
+        let params = TrackParams {
+            interval_sec: 1.0,
+            subdivision,
+            weak_volume_pct: 50.0,
+            triple_accent: accent,
+            sample_rate: 32_000,
+            ..TrackParams::default()
+        };
+        let step = (params.step_sec() * 32_000.0) as usize;
+        let mut sequence = BeepSequence::with_meter(&params, (step * count) as u64, 0.0, true);
+        let mut out = vec![0.0f32; step * count];
+        assert_eq!(sequence.render(&mut out), out.len());
+        (0..count)
+            .map(|i| {
+                let peak = out[i * step..i * step + step / 2]
+                    .iter()
+                    .fold(0.0f32, |peak, v| peak.max(v.abs()));
+                assert!(peak > 0.3, "{i}번째 비프가 없다");
+                peak > 0.7
+            })
+            .collect()
+    }
+
+    #[test]
+    fn triple_meter_groups_beeps_in_threes() {
+        let (s, w) = (true, false);
+        // 2분할 강약강: 분할대로 강약을 놓고 마디(비프 세 개)마다 다시 시작한다.
+        assert_eq!(triple_pattern(2, 0, 7), [s, w, s, s, w, s, s]);
+        // 강약약: 마디의 첫 비프만 강하다(1분할이어도).
+        assert_eq!(triple_pattern(2, 1, 7), [s, w, w, s, w, w, s]);
+        assert_eq!(triple_pattern(1, 1, 4), [s, w, w, s]);
+        // 3분할 이상은 어느 쪽이든 강약약이 된다.
+        assert_eq!(triple_pattern(3, 0, 7), [s, w, w, s, w, w, s]);
+        assert_eq!(triple_pattern(4, 0, 4), [s, w, w, s]);
+        // 1분할 강약강은 모두 강하다.
+        assert_eq!(triple_pattern(1, 0, 3), [s, s, s]);
+    }
 
     fn collect(mut seq: BeepSequence, chunk: usize) -> Vec<f32> {
         let mut all = Vec::new();

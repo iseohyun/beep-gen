@@ -12,11 +12,15 @@ pub mod defaults {
     pub const SUBDIVISION: u32 = 2;
     pub const WEAK_VOLUME_PCT: f64 = 35.0;
     pub const LENGTH_SEC: u32 = 300;
-    pub const BEEP_VOLUME_PCT: f64 = 100.0;
-    pub const MUSIC_VOLUME_PCT: f64 = 70.0;
+    // 비프는 한 음높이의 또렷한 소리라 같은 크기여도 음악보다 훨씬 크게 들린다.
+    // 음악이 주인공이 되도록 비프를 낮춰 둔다.
+    pub const BEEP_VOLUME_PCT: f64 = 30.0;
+    pub const MUSIC_VOLUME_PCT: f64 = 100.0;
     pub const PRIMARY_FREQ: f64 = 880.0;
     pub const SUB_FREQ: f64 = 587.33;
     pub const SAMPLE_RATE: u32 = 44_100;
+    pub const METER: u32 = 0;
+    pub const TRIPLE_ACCENT: u32 = 0;
 }
 
 /// 허용 범위(양 끝 포함).
@@ -25,7 +29,12 @@ pub mod limits {
     pub const SUBDIVISION: (u32, u32) = (1, 64);
     pub const WEAK_VOLUME_PCT: (f64, f64) = (0.0, 100.0);
     pub const LENGTH_SEC: (u32, u32) = (1, 3600);
-    pub const VOLUME_PCT: (f64, f64) = (0.0, 100.0);
+    /// 음량(%). 100 을 넘기면 그만큼 더 키운다(화면의 +10 dB 까지 낼 수 있는 범위).
+    pub const VOLUME_PCT: (f64, f64) = (0.0, 500.0);
+    /// 박자 계열: 0 자동, 2 = 2박 계열, 3 = 3박 계열.
+    pub const METERS: [u32; 3] = [0, 2, 3];
+    /// 3박 계열의 강약 패턴: 0 강약강, 1 강약약.
+    pub const TRIPLE_ACCENTS: [u32; 2] = [0, 1];
     pub const FREQ: (f64, f64) = (20.0, 20_000.0);
     /// MP3(MPEG-1 Layer III)가 지원하는 샘플 레이트.
     pub const SAMPLE_RATES: [u32; 3] = [32_000, 44_100, 48_000];
@@ -68,7 +77,8 @@ pub struct TrackParams {
     #[serde(rename = "length")]
     pub length_sec: u32,
 
-    /// 비프 전체의 음량 (%, 0~100). 0이면 비프 없이 음악만 나온다.
+    /// 배경 음악과 함께 넣을 때의 비프 음량 (%, 0~500). 0이면 비프 없이 음악만 나오고,
+    /// 100 을 넘기면 그만큼 더 키운다. 배경 음악이 없으면 쓰지 않는다(비프는 늘 제 크기로 나온다).
     #[cfg_attr(
         feature = "cli",
         arg(long = "beep-volume", default_value_t = defaults::BEEP_VOLUME_PCT)
@@ -76,7 +86,9 @@ pub struct TrackParams {
     #[serde(rename = "beep-volume")]
     pub beep_volume_pct: f64,
 
-    /// 배경 음악의 음량 (%, 0~100). 배경 음악이 있을 때만 쓴다.
+    /// 배경 음악의 음량 (%, 0~500). 100이면 곡의 가장 큰 순간이 최대 크기가 된다
+    /// (작게 녹음된 곡은 그만큼 키운다). 음악과 비프를 더한 크기가 최대를 넘으면 둘을 같은
+    /// 비율로 줄이므로, 100 을 넘는 값은 비프에 비해 음악을 더 키우는 뜻이다. 배경 음악이 있을 때만 쓴다.
     #[cfg_attr(
         feature = "cli",
         arg(long = "music-volume", default_value_t = defaults::MUSIC_VOLUME_PCT)
@@ -107,6 +119,20 @@ pub struct TrackParams {
     )]
     #[serde(rename = "sample-rate")]
     pub sample_rate: u32,
+
+    /// 배경 음악의 박자 계열. 0 = 소리를 보고 정함, 2 = 2박 계열(2/4, 4/4), 3 = 3박 계열(3/4, 6/8).
+    #[cfg_attr(feature = "cli", arg(long = "meter", default_value_t = defaults::METER))]
+    #[serde(rename = "meter")]
+    pub meter: u32,
+
+    /// 3박 계열 곡에서 한 마디(비프 세 개)의 강약. 0 = 강약강(분할대로 강약을 놓고 마디마다
+    /// 다시 시작), 1 = 강약약(마디의 첫 비프만 강하게).
+    #[cfg_attr(
+        feature = "cli",
+        arg(long = "triple-accent", default_value_t = defaults::TRIPLE_ACCENT)
+    )]
+    #[serde(rename = "triple-accent")]
+    pub triple_accent: u32,
 }
 
 /// 입력값 하나의 종류.
@@ -138,10 +164,26 @@ pub struct ParamSpec {
     pub step: f64,
     /// `kind` 가 `Choice` 일 때 고를 수 있는 값.
     pub choices: Vec<f64>,
+    /// 고를 수 있는 값마다의 이름(`choices` 와 같은 순서). 비어 있으면 값을 그대로 보여준다.
+    pub choice_labels: Vec<&'static str>,
     /// 자주 바꾸지 않는 고급 설정인지.
     pub advanced: bool,
     /// 이 항목이 쓰이는 경우. 쓰이지 않는 경우에는 화면에서 숨긴다.
     pub when: ParamWhen,
+    /// 소리 크기(%)인 항목이면, 화면에서 dB 슬라이더로 보여줄 때의 눈금.
+    pub level: Option<LevelScale>,
+}
+
+/// 소리 크기 항목을 dB 로 보여줄 때의 눈금. 값(%)과 dB 의 관계:
+/// `dB = top_db + 20 × log10(값 / 100)`, 그리고 `floor_db` 이하는 0%(끔)이다.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct LevelScale {
+    /// 값이 100% 일 때의 크기(dB).
+    pub top_db: f64,
+    /// 슬라이더의 맨 아래(dB). 여기까지 내리면 소리를 끈다.
+    pub floor_db: f64,
+    /// 슬라이더의 맨 위(dB).
+    pub ceil_db: f64,
 }
 
 /// 파라미터가 쓰이는 경우.
@@ -169,9 +211,21 @@ impl ParamSpec {
             max: 0.0,
             step: 1.0,
             choices: Vec::new(),
+            choice_labels: Vec::new(),
             advanced: false,
             when: ParamWhen::Always,
+            level: None,
         }
+    }
+
+    /// 소리 크기 항목으로 표시한다. `top_db` 는 100% 일 때의 크기다.
+    fn level(mut self, top_db: f64) -> Self {
+        self.level = Some(LevelScale {
+            top_db,
+            floor_db: crate::levels::SLIDER_FLOOR_DB,
+            ceil_db: crate::levels::SLIDER_CEIL_DB,
+        });
+        self
     }
 
     fn when(mut self, when: ParamWhen) -> Self {
@@ -210,6 +264,11 @@ impl ParamSpec {
         self
     }
 
+    fn labels(mut self, labels: &[&'static str]) -> Self {
+        self.choice_labels = labels.to_vec();
+        self
+    }
+
     fn advanced(mut self) -> Self {
         self.advanced = true;
         self
@@ -235,8 +294,8 @@ pub fn param_specs() -> Vec<ParamSpec> {
         .integer_range(defaults::SUBDIVISION, limits::SUBDIVISION),
         ParamSpec::number(
             "weak-volume",
-            "약한 비프 볼륨",
-            "강한 비프 대비 약한 비프의 크기입니다.",
+            "분할 비프 볼륨",
+            "주기를 쪼갠 지점에서 울리는 약한 비프의 크기입니다(강한 비프 대비).",
         )
         .unit("%")
         .range(defaults::WEAK_VOLUME_PCT, limits::WEAK_VOLUME_PCT, 5.0),
@@ -247,15 +306,37 @@ pub fn param_specs() -> Vec<ParamSpec> {
         ParamSpec::number(
             "beep-volume",
             "비프 음량",
-            "비프 전체의 크기입니다. 0이면 비프 없이 음악만 나옵니다.",
+            "음악과 함께 나올 때의 비프 크기입니다. 0이면 비프 없이 음악만 나옵니다. 100% 를 넘기면 그만큼 더 키웁니다.",
         )
         .unit("%")
         .range(defaults::BEEP_VOLUME_PCT, limits::VOLUME_PCT, 5.0)
+        .level(crate::levels::beep_top_db())
         .when(ParamWhen::WithMusic),
-        ParamSpec::number("music-volume", "음악 음량", "배경 음악의 크기입니다.")
-            .unit("%")
-            .range(defaults::MUSIC_VOLUME_PCT, limits::VOLUME_PCT, 5.0)
-            .when(ParamWhen::WithMusic),
+        ParamSpec::number(
+            "music-volume",
+            "음악 음량",
+            "배경 음악의 크기입니다. 100% 는 곡의 가장 큰 순간이 낼 수 있는 최대 크기가 되는 값입니다. 음악과 비프를 더한 크기가 최대를 넘으면 둘을 같은 비율로 줄입니다.",
+        )
+        .unit("%")
+        .range(defaults::MUSIC_VOLUME_PCT, limits::VOLUME_PCT, 5.0)
+        .level(0.0)
+        .when(ParamWhen::WithMusic),
+        ParamSpec::number(
+            "meter",
+            "박자",
+            "곡의 박자 계열입니다. 자동은 소리를 보고 정합니다. 분석이 틀렸으면 직접 고릅니다.",
+        )
+        .choices(defaults::METER, &limits::METERS)
+        .labels(&["자동", "2박 계열 (2/4, 4/4)", "3박 계열 (3/4, 6/8)"])
+        .when(ParamWhen::WithMusic),
+        ParamSpec::number(
+            "triple-accent",
+            "3박 패턴",
+            "3박 계열 곡에서 비프 세 개가 한 마디입니다. 강약강은 분할대로 강약을 놓고 마디마다 다시 시작하고, 강약약은 마디의 첫 비프만 강하게 울립니다.",
+        )
+        .choices(defaults::TRIPLE_ACCENT, &limits::TRIPLE_ACCENTS)
+        .labels(&["강약강", "강약약"])
+        .when(ParamWhen::WithMusic),
         ParamSpec::number(
             "primary-freq",
             "강한 비프 주파수",
@@ -287,6 +368,8 @@ impl Default for TrackParams {
             primary_freq: defaults::PRIMARY_FREQ,
             sub_freq: defaults::SUB_FREQ,
             sample_rate: defaults::SAMPLE_RATE,
+            meter: defaults::METER,
+            triple_accent: defaults::TRIPLE_ACCENT,
         }
     }
 }
@@ -311,6 +394,21 @@ impl TrackParams {
                     limits::SAMPLE_RATES
                 ),
             });
+        }
+        for (name, value, allowed) in [
+            ("meter", self.meter, &limits::METERS[..]),
+            (
+                "triple-accent",
+                self.triple_accent,
+                &limits::TRIPLE_ACCENTS[..],
+            ),
+        ] {
+            if !allowed.contains(&value) {
+                return Err(Error::InvalidParam {
+                    name,
+                    reason: format!("{value} 은(는) 쓸 수 없습니다 (가능: {allowed:?})"),
+                });
+            }
         }
         // 나이퀴스트 한계: 주파수는 샘플 레이트의 절반보다 낮아야 한다.
         let nyquist = f64::from(self.sample_rate) / 2.0;

@@ -4,23 +4,30 @@
 //! 시계·OS 호출을 직접 쓰지 않는다. 입력은 값으로 받고, 결과는 바이트로 돌려준다.
 //! (규칙: `.agents/rules/project_architecture.md` 2.2절)
 
+pub mod beatmap;
 pub mod decode;
 pub mod describe;
 pub mod encode;
 pub mod error;
 pub mod intro;
+pub mod levels;
 pub mod music;
 pub mod naming;
 pub mod params;
 pub mod resample;
+pub mod steady;
 pub mod synth;
 
 pub use describe::{AppInfo, describe};
 pub use encode::OutputFormat;
 pub use error::{Error, Result};
 pub use intro::{DEFAULT_INTRO_TEMPLATE, intro_text};
+pub use levels::{LevelGuide, level_guide};
 pub use music::MusicReport;
-pub use naming::{MusicName, SongGuess, SongInfo, SongSource, identify_song, output_file_name};
+pub use naming::{
+    DEFAULT_NAME_FORMAT, MusicName, NAME_FORMATS, SongGuess, SongInfo, SongSource,
+    format_file_name, identify_song, output_file_name,
+};
 pub use params::{ParamKind, ParamSpec, ParamWhen, TrackParams, param_specs};
 
 use encode::Encoder;
@@ -73,6 +80,51 @@ pub struct Progress {
 const RENDER_START_WITH_MUSIC: u64 = 20;
 const ANALYZE_START: u8 = 8;
 
+/// 미리듣기용 발췌: 전체를 만들지 않고 일부 구간만 만든다.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Excerpt {
+    /// 발췌할 길이(초).
+    pub seconds: f64,
+    /// 어디서부터 들을지: 전체 길이에 대한 위치(0~100%). 가장 가까운 강한 비프에서 시작한다.
+    pub from_percent: f64,
+}
+
+impl Excerpt {
+    /// 미리듣기의 기본 길이(초).
+    pub const DEFAULT_SECONDS: f64 = 10.0;
+    /// 미리듣기의 기본 시작 위치(%). 곡의 도입부를 지나 소리가 다 나오는 곳을 듣는다.
+    pub const DEFAULT_FROM_PERCENT: f64 = 30.0;
+    /// 발췌할 수 있는 길이의 범위(초).
+    pub const SECONDS_RANGE: (f64, f64) = (1.0, 120.0);
+
+    fn validate(&self) -> Result<()> {
+        let (min, max) = Self::SECONDS_RANGE;
+        if !(self.seconds.is_finite() && (min..=max).contains(&self.seconds)) {
+            return Err(Error::InvalidParam {
+                name: "preview",
+                reason: format!("{} 은(는) {min}~{max} 초 범위를 벗어났습니다", self.seconds),
+            });
+        }
+        if !(self.from_percent.is_finite() && (0.0..=100.0).contains(&self.from_percent)) {
+            return Err(Error::InvalidParam {
+                name: "preview-from",
+                reason: format!("{} 은(는) 0~100 범위를 벗어났습니다", self.from_percent),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Default for Excerpt {
+    fn default() -> Self {
+        Self {
+            seconds: Self::DEFAULT_SECONDS,
+            from_percent: Self::DEFAULT_FROM_PERCENT,
+        }
+    }
+}
+
 /// 음원에 넣을 외부 소리. 모두 오디오 파일의 내용(바이트)으로 받는다.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TrackInputs<'a> {
@@ -81,6 +133,8 @@ pub struct TrackInputs<'a> {
     pub music: Option<&'a [u8]>,
     /// 시작 안내 음성(TTS 등). 맨 앞에 넣고, 짧은 무음 뒤에 비프가 시작된다.
     pub intro: Option<&'a [u8]>,
+    /// 미리듣기: 이 구간만 만든다. `None` 이면 전체를 만든다.
+    pub excerpt: Option<Excerpt>,
 }
 
 /// 만들어진 음원.
@@ -102,13 +156,23 @@ pub fn build_track(
     mut on_progress: impl FnMut(Progress),
 ) -> Result<TrackOutput> {
     params.validate()?;
+    if let Some(excerpt) = &inputs.excerpt {
+        excerpt.validate()?;
+    }
     let intro = inputs
         .intro
         .map(|bytes| intro::decode_intro(bytes, params.sample_rate))
         .transpose()?;
     match inputs.music {
-        None => build_beeps_only(params, format, intro, &mut on_progress),
-        Some(bytes) => build_with_music(params, format, bytes, intro, &mut on_progress),
+        None => build_beeps_only(params, format, intro, inputs.excerpt, &mut on_progress),
+        Some(bytes) => build_with_music(
+            params,
+            format,
+            bytes,
+            intro,
+            inputs.excerpt,
+            &mut on_progress,
+        ),
     }
 }
 
@@ -131,23 +195,28 @@ fn build_beeps_only(
     params: &TrackParams,
     format: OutputFormat,
     intro: Option<intro::Intro>,
+    excerpt: Option<Excerpt>,
     on_progress: &mut dyn FnMut(Progress),
 ) -> Result<TrackOutput> {
-    let mut sequence = BeepSequence::new(params);
+    // 비프만 있는 음원은 처음부터 끝까지 같으므로, 미리듣기는 앞부분을 들려준다.
+    let mut sequence = match excerpt {
+        Some(excerpt) => {
+            let full = u64::from(params.length_sec) * u64::from(params.sample_rate);
+            let wanted = libm::round(excerpt.seconds * f64::from(params.sample_rate)) as u64;
+            BeepSequence::with_layout(params, wanted.min(full), 0.0)
+        }
+        None => BeepSequence::new(params),
+    };
     let mut encoder = Encoder::new(format, params.sample_rate, 1);
     let intro_seconds = push_intro(&mut encoder, intro, params.sample_rate, 1)?;
     let total = sequence.total_frames();
-    let gain = (params.beep_volume_pct / 100.0) as f32;
     let mut chunk = vec![0.0f32; CHUNK_FRAMES];
 
+    // 비프 음량(`beep-volume`)은 음악과의 균형을 잡는 값이라 여기서는 쓰지 않는다.
     loop {
         let count = sequence.render(&mut chunk);
         if count == 0 {
             break;
-        }
-        // 기본값(100%)에서는 곱해도 값이 그대로다.
-        for sample in &mut chunk[..count] {
-            *sample *= gain;
         }
         encoder.push(&chunk[..count])?;
         on_progress(Progress {
@@ -168,6 +237,7 @@ fn build_with_music(
     format: OutputFormat,
     music_bytes: &[u8],
     intro: Option<intro::Intro>,
+    excerpt: Option<Excerpt>,
     on_progress: &mut dyn FnMut(Progress),
 ) -> Result<TrackOutput> {
     on_progress(Progress {
@@ -181,23 +251,39 @@ fn build_with_music(
         percent: ANALYZE_START,
     });
     let mut stream = MusicStream::new(audio, params)?;
+    if let Some(excerpt) = excerpt {
+        stream.select_excerpt(params, excerpt)?;
+    }
 
     let channels = stream.channels();
     let total = stream.total_frames();
-    let mut beeps = BeepSequence::with_layout(params, total, stream.anchor_frames());
+    let mut beeps = BeepSequence::with_meter(
+        params,
+        total,
+        stream.anchor_frames(),
+        stream.report().triple_meter,
+    );
     let mut encoder = Encoder::new(format, params.sample_rate, channels as u16);
     let intro_seconds = push_intro(&mut encoder, intro, params.sample_rate, channels)?;
 
+    // 음악은 가장 큰 순간이 최대 크기가 되도록 맞춘 뒤 음량을 곱한다. 작게 녹음된 곡도
+    // 음량 100% 에서 같은 크기로 나오고, 화면의 dB 눈금과 실제 소리가 어긋나지 않는다.
     // 음악과 비프의 최대 진폭 합이 1을 넘으면 소리가 찌그러지므로, 넘는 만큼 둘 다 줄인다.
     let music_volume = params.music_volume_pct / 100.0;
     let beep_volume = params.beep_volume_pct / 100.0;
-    let worst_peak = music_volume * f64::from(stream.source_peak()) + beep_volume * synth::HEADROOM;
+    let source_peak = f64::from(stream.source_peak());
+    let to_full_scale = if source_peak > 0.0 {
+        1.0 / source_peak
+    } else {
+        1.0
+    };
+    let worst_peak = music_volume + beep_volume * synth::HEADROOM;
     let normalize = if worst_peak > 1.0 {
         1.0 / worst_peak
     } else {
         1.0
     };
-    let music_gain = (music_volume * normalize) as f32;
+    let music_gain = (music_volume * to_full_scale * normalize) as f32;
     let beep_gain = (beep_volume * normalize) as f32;
 
     let mut block = Vec::new();
@@ -278,9 +364,46 @@ mod tests {
     }
 
     #[test]
-    fn beep_volume_scales_output() {
+    fn beeps_only_excerpt_is_the_first_seconds() {
+        let params = TrackParams {
+            length_sec: 60,
+            ..TrackParams::default()
+        };
+        let inputs = TrackInputs {
+            excerpt: Some(Excerpt {
+                seconds: 3.0,
+                from_percent: 50.0,
+            }),
+            ..TrackInputs::default()
+        };
+        let preview = build_track(&params, OutputFormat::Wav, inputs, |_| {}).unwrap();
+        let full = build_track(&params, OutputFormat::Wav, TrackInputs::default(), |_| {}).unwrap();
+        assert_eq!(preview.bytes.len(), 44 + 3 * 44_100 * 2);
+        assert_eq!(preview.bytes[44..], full.bytes[44..preview.bytes.len()]);
+
+        // 음원보다 긴 미리듣기는 음원 길이까지만.
+        let short = TrackParams {
+            length_sec: 2,
+            ..params
+        };
+        let preview = build_track(&short, OutputFormat::Wav, inputs, |_| {}).unwrap();
+        assert_eq!(preview.bytes.len(), 44 + 2 * 44_100 * 2);
+
+        let bad = TrackInputs {
+            excerpt: Some(Excerpt {
+                seconds: 0.0,
+                from_percent: 0.0,
+            }),
+            ..TrackInputs::default()
+        };
+        assert!(build_track(&short, OutputFormat::Wav, bad, |_| {}).is_err());
+    }
+
+    #[test]
+    fn beep_volume_only_matters_with_music() {
         let full = TrackParams {
             length_sec: 1,
+            beep_volume_pct: 100.0,
             ..TrackParams::default()
         };
         let half = TrackParams {
@@ -298,7 +421,8 @@ mod tests {
                 .unwrap()
         };
         let (full_peak, half_peak) = (peak(&full), peak(&half));
-        assert!((i32::from(full_peak) - 2 * i32::from(half_peak)).abs() <= 2);
+        assert_eq!(full_peak, half_peak);
+        assert!(full_peak > 30_000);
     }
 
     #[test]

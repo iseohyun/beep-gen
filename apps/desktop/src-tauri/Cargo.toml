@@ -21,3 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.12.5", features = [] }
 tauri-plugin-dialog = "2.8.4"
+
+[target.'cfg(windows)'.dependencies]
+# 가상 데스크톱(창이 있던 데스크톱 기억하기)에 쓴다. Tauri 가 쓰는 것과 같은 버전이다.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
