@@ -3,6 +3,7 @@
 //! 화면(apps/web)이 부르는 명령을 받아 공용 절차(`beep_native::job`)로 넘긴다.
 //! 여기에도 소리를 만드는 계산은 없다. 값을 옮길 뿐이다.
 
+mod release;
 mod update;
 mod window_state;
 
@@ -13,7 +14,7 @@ use beep_core::{Excerpt, MusicReport, OutputFormat, SongInfo, TrackParams};
 use beep_native::job::{self, IntroRequest, JobRequest};
 use beep_native::song::{self, Identified};
 use beep_native::tags::{self, SongTags};
-use beep_native::{fetch, tts};
+use beep_native::{dev_update, fetch, tts};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
 use tauri::{Manager, State, WindowEvent};
@@ -514,27 +515,45 @@ fn show_in_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 지금 실행 중인 것보다 새로운 개발 빌드가 있는지.
+/// 새 버전이 있는지. 개발 빌드가 있으면 그것을, 없으면 GitHub 릴리즈의 새 버전을 알려준다.
 #[tauri::command]
-fn check_update() -> Option<update::UpdateInfo> {
-    update::check()
+async fn check_update(
+    app: tauri::AppHandle,
+    release: State<'_, release::ReleaseState>,
+) -> Result<Option<update::UpdateInfo>, String> {
+    if let Some(found) = update::check_dev_build() {
+        return Ok(Some(found));
+    }
+    release::check_release(&app, &release).await
 }
 
-/// 새 개발 빌드로 바꾸고 앱을 다시 시작한다.
+/// 화면이 보여준 새 버전(`source`)으로 바꾸고 앱을 다시 시작한다.
 #[tauri::command]
-fn apply_update(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+async fn apply_update(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    release: State<'_, release::ReleaseState>,
+    source: update::UpdateSource,
+) -> Result<(), String> {
     // 새로 뜨는 앱이 같은 자리(같은 가상 데스크톱)에서 열리도록 먼저 적어 둔다.
     window_state::save(&window);
-    update::apply()?;
-    app.exit(0);
-    Ok(())
+    match source {
+        update::UpdateSource::DevBuild => {
+            dev_update::apply()?;
+            app.exit(0);
+            Ok(())
+        }
+        update::UpdateSource::Release => release::apply_release(&release).await,
+    }
 }
 
 pub fn run() {
-    update::clean_up();
+    dev_update::clean_up();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
+        .manage(release::ReleaseState::default())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 window_state::restore(&window);

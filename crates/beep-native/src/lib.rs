@@ -5,6 +5,7 @@
 //! (규칙: `.agents/rules/project_architecture.md` 2.2절)
 
 pub mod ai;
+pub mod dev_update;
 pub mod fetch;
 pub mod job;
 pub mod song;

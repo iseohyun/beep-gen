@@ -1,0 +1,82 @@
+name: 릴리즈
+
+# `v0.2.0` 같은 태그를 올리면 Windows 설치 파일을 만들어 서명하고 GitHub 릴리즈에 올린다.
+# 로컬앱의 업데이트 버튼은 가장 최근 릴리즈의 `latest.json` 을 보고 새 버전을 받는다.
+#
+# 저장소 Settings → Secrets and variables → Actions 에 다음이 있어야 한다:
+#   TAURI_SIGNING_PRIVATE_KEY           서명 비밀 키 파일의 내용
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  그 키의 암호(암호 없이 만든 키면 만들지 않는다)
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # 태그와 Cargo 작업 공간 버전이 다르면 앱이 스스로를 다른 버전으로 알게 되므로 여기서 멈춘다.
+      - name: 태그와 버전이 같은지 확인
+        id: version
+        run: |
+          version="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "태그($GITHUB_REF_NAME)와 Cargo 작업 공간 버전($version)이 다릅니다." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Rust 도구 준비
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+
+      - name: 웹 앱 패키지 준비
+        working-directory: apps/web
+        run: npm ci
+
+      # 웹 화면 빌드(beforeBuildCommand) → 실행 파일 → NSIS 설치 파일 → 서명(.sig) 순으로 만든다.
+      - name: 설치 파일 만들고 서명
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: 릴리즈에 올릴 파일 모으기
+        run: >
+          node tools/make_latest_json.mjs
+          target/release/bundle/nsis
+          "${{ steps.version.outputs.version }}"
+          "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          release
+
+      - name: GitHub 릴리즈 만들기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

@@ -143,11 +143,22 @@
 - **아이콘**: `index.html` 맨 위의 아이콘 모음(`<symbol>`)에 선으로만 그린 아이콘을 두고 `.icon` 한 가지 모양(굵기 1.75)으로 쓴다. 채워진 아이콘이나 그림 글자(이모지)를 섞지 않는다.
 - **배경음**: 처음에는 파일·URL 아이콘 버튼만 보인다. 고른 뒤에는 그 자리가 배경음 이름(읽기 전용)과 다시 고르기 버튼, 가수·곡명·작곡자·링크·AI 활용·파일명 갱신, 음량으로 바뀐다.
 - **값이 들어간 모습으로 보여주는 선택지**: 파일명과 시작음 문구는 형식(`[{n}초] {가수} - {곡}`)이 아니라 지금 설정에서의 결과(`[1.4초] Foyage - Come a Little Closer`)를 보여준다. 직접 입력을 고르면 형식을 적는다. 실제 이름은 코어가 짓는다.
-- **업데이트 버튼(로컬앱, 2026-11-15 사용자 확정)**: 화면 위쪽 버전 표기 옆에 둔다. 지금 실행 중인 것보다 새로운 개발 빌드가 옆 폴더에 있으면 켜지고(`target/release` 에서 실행 중이면 `target/verify/release`, 그 반대도 같다), 누르면 실행 파일을 바꾸고 앱을 다시 시작한다. 인터넷은 쓰지 않는다(`update.rs`, `capabilities.updates`). 앱이 켜져 있어 덮어쓸 수 없을 때 새 빌드는 `target/verify` 에 만든다. GitHub 릴리즈로 받는 정식 업데이트는 배포 절차를 정한 뒤 따로 넣는다.
+- **업데이트 버튼(로컬앱, 2026-11-15 사용자 확정)**: 화면 위쪽 버전 표기 옆에 둔다. 지금 실행 중인 것보다 새로운 개발 빌드가 옆 폴더에 있으면 켜지고(`target/release` 에서 실행 중이면 `target/verify/release`, 그 반대도 같다), 누르면 실행 파일을 바꾸고 앱을 다시 시작한다. 개발 빌드 확인에는 인터넷을 쓰지 않는다(`beep_native::dev_update`, `capabilities.updates`). 앱이 켜져 있어 덮어쓸 수 없을 때 새 빌드는 `target/verify` 에 만든다. 개발 빌드가 없으면 같은 버튼이 정식 릴리즈의 새 버전을 알려준다(4.11절).
 - **창이 있던 자리 기억(로컬앱, 2026-11-15 사용자 확정)**: 창의 위치·크기와 Windows 가상 데스크톱을 기억해 두고 다음에 그 자리에서 연다(`window_state.rs`). 업데이트로 다시 시작할 때도 같다.
 - **저장한 폴더 열기(로컬앱)**: 결과 구역의 저장 버튼 옆 폴더 아이콘은 방금 저장한 파일이 있는 폴더를 파일 탐색기로 연다. 저장한 뒤에만 보인다.
 - **저장 위치(로컬앱)**: "만들기" 를 누르면 고른 폴더에 바로 저장한다. 선택지는 배경음 위치/output(처음 기본값), 배경음 위치, 지난번 위치, 다운로드, 내 음악, 폴더 고르기(배경음 파일의 폴더에서 시작). 배경음의 위치를 모르면(주소로 넣었거나 음악이 없으면) 다운로드 폴더에 저장한다. 같은 이름의 파일이 있으면 덮어쓸지 묻는다. 웹은 폴더를 정할 수 없으므로 결과 구역의 "파일 저장" 으로 내려받는다(`capabilities.saveFolders`).
 - **글자 칸에서 Enter 로는 만들지 않는다.** 만들기는 버튼으로만 한다(저장까지 이어지므로).
+
+### 4.11 정식 릴리즈와 업데이트 (로컬앱, 2026-11-15 사용자 확정)
+- **받는 곳**: 공개 저장소 `iseohyun/beep-gen` 의 GitHub 릴리즈. 앱은 `https://github.com/iseohyun/beep-gen/releases/latest/download/latest.json` 을 본다(`tauri.conf.json` 의 `plugins.updater`, `tauri-plugin-updater`).
+- **버튼 하나로 둘 다**: `check_update` 는 개발 빌드가 있으면 그것을, 없으면 릴리즈의 새 버전을 알려준다. `UpdateInfo` 의 `source`(`dev-build`/`release`)와 `version` 을 화면이 풍선 도움말에 보여주고, `apply_update` 에 `source` 를 그대로 넘긴다.
+- **받는 시점**: 버튼을 눌렀을 때만 내려받아 설치한다. 앱은 새 버전이 있는지만 스스로 확인한다(켤 때와 그 뒤 한 시간마다, 실패하면 10분 뒤. 화면은 30초마다 묻지만 그 사이에는 `release.rs` 가 지난 답을 돌려준다).
+- **코드 위치**: 개발 빌드의 파일 다루기는 `beep_native::dev_update`(테스트 포함), 릴리즈는 로컬앱의 `release.rs`, 화면에 넘기는 자료형은 `update.rs`. 로컬앱 크레이트(`beep-desktop`)에는 테스트를 두지 않는다(`[lib] test = false`): 앱 본체가 담긴 테스트 실행 파일은 창 코드가 공용 컨트롤 v6 매니페스트를 요구해 Windows 에서 뜨지 못한다(`STATUS_ENTRYPOINT_NOT_FOUND`). 테스트할 로직은 Tauri 에 기대지 않는 `beep-native` 에 둔다.
+- **권한**: 업데이트는 Rust 명령(`check_update`, `apply_update`) 안에서만 한다. 화면(JS)에는 업데이터 권한을 주지 않으므로 `capabilities/default.json` 에 `updater:*` 를 넣지 않는다.
+- **서명**: 앱은 설정의 공개 키로 서명된 설치 파일만 설치한다. 비밀 키는 저장소에 넣지 않고 PC 의 `~/.tauri/beep-gen.key` 와 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY` 에 둔다. 키를 바꾸면 이미 설치된 앱은 업데이트를 받지 못하므로 바꾸지 않는다.
+- **릴리즈 만들기**: SemVer 를 올리고(사용자 승인제, `Cargo.toml` 작업 공간 버전 = `APP_VERSION`) `v<버전>` 태그를 올리면 `.github/workflows/release.yml` 이 NSIS 설치 파일을 만들어 서명하고, `tools/make_latest_json.mjs` 로 `latest.json` 을 만들어 릴리즈에 올린다. 태그와 버전이 다르면 멈춘다. 태그를 올리는 것도 푸시이므로 사용자가 요청할 때만 한다.
+- **빌드**: `bundle.createUpdaterArtifacts` 가 켜져 있어 `npm run build`(설치 파일)는 `TAURI_SIGNING_PRIVATE_KEY` 가 있어야 한다. 키 없이 확인할 때는 `npm run build:exe` 를 쓴다(CI 의 `desktop` 작업도 이것을 쓴다).
+- **시험할 때**: 실제 릴리즈 대신 로컬 주소로 시험하려면 `tauri build --config` 로 `plugins.updater.endpoints` 와 `dangerousInsecureTransportProtocol` 을 덮어쓰고, 사용자의 설치본과 섞이지 않게 `productName`·`identifier` 도 바꾼다. 저장소의 설정에는 `https` 주소만 둔다.
 - **입력값 기억과 초기화**(2026-11-15 사용자 확정): 마지막으로 음원을 만들 때의 입력값을 기억해 다음에 그대로 보여준다(음량 포함, 박자 제외). 화면 위쪽 업데이트 버튼 옆의 초기화 버튼이 모든 입력값을 처음 값으로 되돌리고 기억해 둔 값도 지운다. 고른 음악은 그대로 둔다.
 
 ## 5. 오디오 생성 정책

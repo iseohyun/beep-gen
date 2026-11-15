@@ -240,16 +240,20 @@ export interface Capabilities {
   songTags: boolean;
   /** 결과를 정해 둔 폴더에 바로 저장할 수 있는지(`saveTo`). 없으면 `save` 로 내려받는다. */
   saveFolders: boolean;
-  /** 새 빌드가 있는지 확인하고 그것으로 바꿀 수 있는지(`checkUpdate`, `applyUpdate`). */
+  /** 새 버전이 있는지 확인하고 그것으로 바꿀 수 있는지(`checkUpdate`, `applyUpdate`). */
   updates: boolean;
 }
 
-/** 찾은 새 빌드. */
+/** 찾은 새 버전. */
 export interface UpdateInfo {
-  /** 새 실행 파일의 위치. */
-  path: string;
-  /** 새 실행 파일이 만들어진 시각(1970년부터의 밀리초). */
-  built_at_ms: number;
+  /** 온 곳: 옆 폴더에 새로 빌드해 둔 개발 빌드, 또는 GitHub 릴리즈의 정식 버전. */
+  source: "dev-build" | "release";
+  /** 새 버전의 번호. 릴리즈일 때만 안다. */
+  version: string | null;
+  /** 새 실행 파일의 위치. 개발 빌드일 때만 있다. */
+  path: string | null;
+  /** 개발 빌드는 실행 파일이 만들어진 시각, 릴리즈는 올린 시각(1970년부터의 밀리초). */
+  built_at_ms: number | null;
 }
 
 /** 결과를 저장할 곳. */
@@ -308,8 +312,11 @@ export interface Platform {
   saveTo(track: GeneratedTrack, target: SaveTarget): Promise<string | null>;
   /** 마지막으로 저장한 파일이 있는 폴더를 파일 탐색기로 연다(`capabilities.saveFolders` 일 때만). */
   showSavedFolder(): Promise<void>;
-  /** 지금 실행 중인 것보다 새로운 빌드가 있으면 알려준다. 없거나 지원하지 않으면 `null`. */
+  /**
+   * 새 버전이 있으면 알려준다: 개발 빌드가 있으면 그것을, 없으면 릴리즈의 새 버전을.
+   * 없거나 지원하지 않으면 `null`. 내려받지는 않는다.
+   */
   checkUpdate(): Promise<UpdateInfo | null>;
-  /** 새 빌드로 바꾸고 앱을 다시 시작한다. */
-  applyUpdate(): Promise<void>;
+  /** `checkUpdate` 가 알려준 새 버전으로 바꾸고 앱을 다시 시작한다(릴리즈는 이때 내려받는다). */
+  applyUpdate(update: UpdateInfo): Promise<void>;
 }

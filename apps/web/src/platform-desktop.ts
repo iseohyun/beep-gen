@@ -202,8 +202,8 @@ export class DesktopPlatform implements Platform {
     return call<UpdateInfo | null>("check_update");
   }
 
-  async applyUpdate(): Promise<void> {
-    await call("apply_update");
+  async applyUpdate(update: UpdateInfo): Promise<void> {
+    await call("apply_update", { source: update.source });
   }
 
   /** 마지막으로 저장한 파일의 위치. */

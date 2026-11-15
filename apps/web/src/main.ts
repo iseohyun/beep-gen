@@ -17,8 +17,9 @@ import type {
   SaveTarget,
   SaveWhere,
   SongGuess,
+  UpdateInfo,
 } from "./platform";
-import { BUILD_TAG, FULL_VERSION } from "./version";
+import { APP_VERSION, BUILD_TAG, FULL_VERSION } from "./version";
 
 const STORAGE_KEY = "beep-gen.settings.v2";
 /** 이전 저장 형식. 음량 기본값이 바뀌기 전의 값이 들어 있다. */
@@ -1275,21 +1276,28 @@ async function start(platform: Platform): Promise<void> {
     }
   });
 
-  // 업데이트: 지금 실행 중인 것보다 새 빌드가 있으면 버튼이 켜진다.
+  // 업데이트: 새 개발 빌드나 릴리즈의 새 버전이 있으면 버튼이 켜진다. 받아서 바꾸는 것은 눌렀을 때만 한다.
   const updateButton = byId<HTMLButtonElement>("update");
   updateButton.hidden = !capabilities.updates;
+  let foundUpdate: UpdateInfo | null = null;
+  const describeUpdate = (found: UpdateInfo): string => {
+    const when = found.built_at_ms === null ? "" : ` (${new Date(found.built_at_ms).toLocaleString("ko-KR")})`;
+    return found.source === "release"
+      ? `새 버전 ${found.version ?? ""} 이(가) 있습니다${when}. 지금 버전은 ${APP_VERSION} 입니다.
+누르면 GitHub 릴리즈에서 받아 설치하고 다시 시작합니다.`
+      : `새 개발 빌드가 있습니다${when}. 누르면 바꾸고 다시 시작합니다.
+${found.path ?? ""}`;
+  };
   const checkUpdate = async (): Promise<void> => {
     try {
-      const found = await platform.checkUpdate();
-      updateButton.disabled = !found;
-      updateButton.title = found
-        ? `새 빌드가 있습니다 (${new Date(found.built_at_ms).toLocaleString("ko-KR")}). 누르면 바꾸고 다시 시작합니다.
-${found.path}`
-        : "새 빌드가 없습니다.";
-    } catch {
-      // 확인하지 못하면 버튼을 꺼 둔다.
-      updateButton.disabled = true;
+      foundUpdate = await platform.checkUpdate();
+      updateButton.title = foundUpdate ? describeUpdate(foundUpdate) : "새 버전이 없습니다.";
+    } catch (error) {
+      // 확인하지 못하면 버튼을 꺼 두고 이유를 풍선 도움말에 적는다.
+      foundUpdate = null;
+      updateButton.title = error instanceof Error ? error.message : String(error);
     }
+    updateButton.disabled = !foundUpdate;
   };
   if (capabilities.updates) {
     void checkUpdate();
@@ -1298,11 +1306,16 @@ ${found.path}`
     setInterval(() => void checkUpdate(), UPDATE_CHECK_MS);
   }
   updateButton.addEventListener("click", async () => {
+    const update = foundUpdate;
+    if (!update) return;
     updateButton.disabled = true;
     status.className = "status";
-    status.textContent = "새 빌드로 바꾸는 중입니다. 곧 다시 시작합니다…";
+    status.textContent =
+      update.source === "release"
+        ? `새 버전 ${update.version ?? ""} 을(를) 받아 설치하는 중입니다. 곧 다시 시작합니다…`
+        : "새 빌드로 바꾸는 중입니다. 곧 다시 시작합니다…";
     try {
-      await platform.applyUpdate();
+      await platform.applyUpdate(update);
     } catch (error) {
       showError(error);
       void checkUpdate();

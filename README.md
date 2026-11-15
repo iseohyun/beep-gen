@@ -162,6 +162,52 @@ npm run build       # 설치 파일까지 만들기
 
 실행에는 WebView2 런타임이 필요합니다(Windows 11에는 기본 포함).
 
+`npm run build` 는 설치 파일에 업데이트용 서명을 붙이므로 서명 키가 있어야 합니다(아래 "릴리즈와 업데이트"). 키 없이 실행 파일만 만들려면 `npm run build:exe` 를 씁니다.
+
+#### 릴리즈와 업데이트
+
+설치한 앱은 화면 위쪽의 **업데이트** 버튼으로 새 버전을 받습니다. 앱은 켤 때와 그 뒤 한 시간마다 [GitHub 릴리즈](https://github.com/iseohyun/beep-gen/releases)의 `latest.json` 을 보고, 지금보다 높은 버전이 있으면 버튼을 켭니다. 버튼을 누르면 설치 파일을 받아 서명을 확인한 뒤 설치하고 다시 시작합니다. 누르기 전에는 아무것도 내려받지 않습니다.
+
+**릴리즈 만들기** — 태그를 올리면 GitHub Actions(`.github/workflows/release.yml`)가 빌드·서명해서 릴리즈에 올립니다.
+
+1. 버전을 올립니다: `Cargo.toml` 의 `[workspace.package] version` 과 `apps/web/src/version.ts` 의 `APP_VERSION` (둘이 다르면 빌드가 실패합니다).
+2. `main` 에 반영한 뒤 같은 번호의 태그를 올립니다.
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+3. 워크플로가 끝나면 릴리즈에 `beep-gen_0.2.0_x64-setup.exe`, `.sig`, `latest.json` 이 올라갑니다. 태그와 버전이 다르면 워크플로가 멈춥니다.
+
+**서명 키** — 앱은 설정에 들어 있는 공개 키(`apps/desktop/src-tauri/tauri.conf.json` 의 `plugins.updater.pubkey`)로 서명된 설치 파일만 설치합니다. 비밀 키는 저장소에 넣지 않습니다.
+
+- 비밀 키는 PC 의 `~/.tauri/beep-gen.key` (저장소 밖)와 GitHub 저장소의 Actions Secret `TAURI_SIGNING_PRIVATE_KEY` 두 곳에 둡니다.
+
+  ```bash
+  gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/beep-gen.key
+  ```
+
+- 키를 잃어버리면 이미 설치된 앱은 새 키로 서명한 업데이트를 받지 못합니다(새 설치 파일을 직접 받아 다시 설치해야 합니다). 키 파일을 안전한 곳에 따로 보관하세요.
+- 키를 새로 만들 때(암호를 붙이려면 `--ci` 를 빼고, 그 암호를 Secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 에도 넣습니다):
+
+  ```bash
+  cd apps/desktop
+  npx tauri signer generate --ci -w ~/.tauri/beep-gen.key
+  ```
+
+  그다음 `~/.tauri/beep-gen.key.pub` 의 내용을 `plugins.updater.pubkey` 에 넣습니다.
+
+**PC 에서 서명된 설치 파일 만들기** (릴리즈를 손으로 올리거나 시험할 때)
+
+```bash
+cd apps/desktop
+TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/beep-gen.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" npm run build
+node ../../tools/make_latest_json.mjs ../../target/release/bundle/nsis 0.2.0 https://github.com/iseohyun/beep-gen/releases/download/v0.2.0 ../../release
+```
+
+`release/` 폴더에 생긴 세 파일을 릴리즈에 올리면 됩니다.
+
 ### AI 도구 연동 (MCP)
 
 `beep-gen mcp` 는 [MCP](https://modelcontextprotocol.io) 서버로 동작합니다. Claude 같은 AI 도구에 등록하면 "1.4초 템포로 이 음악에 비프 넣어 줘" 같은 요청을 도구가 직접 처리합니다. 서버를 따로 띄울 필요 없이 이 컴퓨터에서 실행됩니다.

@@ -10,6 +10,9 @@ publish = false
 [lib]
 name = "beep_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+# 앱 본체를 담은 테스트 실행 파일은 Windows 에서 뜨지 못한다(창 코드가 공용 컨트롤 v6
+# 매니페스트를 요구한다). 테스트할 로직은 Tauri 에 기대지 않는 beep-native 에 둔다.
+test = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -21,6 +24,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2.12.5", features = [] }
 tauri-plugin-dialog = "2.8.4"
+tauri-plugin-updater = "2.12.0"
 
 [target.'cfg(windows)'.dependencies]
 # 가상 데스크톱(창이 있던 데스크톱 기억하기)에 쓴다. Tauri 가 쓰는 것과 같은 버전이다.
