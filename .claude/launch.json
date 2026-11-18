@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "beep-gen-web",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": [
+        "--prefix",
+        "apps/web",
+        "run",
+        "preview",
+        "--",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
+    }
+  ]
+}
